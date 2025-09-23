@@ -371,8 +371,7 @@ async function performWebSearch(query) {
     if (!snippets.length) {
       return null;
     }
-    return snippets.slice(0, 5).map((snippet, index) => `${index + 1}. ${snippet}`).join('
-');
+    return snippets.slice(0, 5).map((snippet, index) => `${index + 1}. ${snippet}`).join('\n');
   } catch (error) {
     console.error('performWebSearch error', error);
     return null;
