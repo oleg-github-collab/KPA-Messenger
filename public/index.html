@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Simple AI Messenger</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-body">
+  <main class="auth-container">
+    <section class="card" id="loginCard">
+      <h1>Simple AI Messenger</h1>
+      <p class="muted">Sign in with pre-configured credentials to host a meeting.</p>
+      <form id="loginForm" class="stack-form" autocomplete="off">
+        <label for="username">Username</label>
+        <input id="username" name="username" required placeholder="alice" autofocus>
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required placeholder="secret123">
+
+        <button type="submit" class="primary">Log In</button>
+      </form>
+      <div id="loginError" class="error hidden"></div>
+    </section>
+
+    <section class="card hidden" id="dashboardCard">
+      <header class="card-header">
+        <div>
+          <h2 id="welcomeHeading"></h2>
+          <p class="muted">Generate one-time meeting links and share them just like Google Meet.</p>
+        </div>
+        <button id="logoutBtn" class="ghost">Log out</button>
+      </header>
+
+      <div class="card-body">
+        <button id="createMeetingBtn" class="primary full-width">Create one-time meeting</button>
+
+        <div id="meetingBlock" class="meeting-block hidden">
+          <h3>Your meeting is ready</h3>
+          <p class="muted">Share this link with a participant. It expires after the meeting ends.</p>
+          <div class="link-row">
+            <input id="meetingLink" readonly>
+            <button id="copyMeetingBtn" class="ghost">Copy</button>
+          </div>
+          <div class="actions-row">
+            <button id="openMeetingBtn" class="primary">Open meeting</button>
+          </div>
+          <div id="meetingMessage" class="muted"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const loginForm = document.getElementById('loginForm');
+    const loginCard = document.getElementById('loginCard');
+    const dashboardCard = document.getElementById('dashboardCard');
+    const welcomeHeading = document.getElementById('welcomeHeading');
+    const loginError = document.getElementById('loginError');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const createMeetingBtn = document.getElementById('createMeetingBtn');
+    const meetingBlock = document.getElementById('meetingBlock');
+    const meetingLinkInput = document.getElementById('meetingLink');
+    const copyMeetingBtn = document.getElementById('copyMeetingBtn');
+    const openMeetingBtn = document.getElementById('openMeetingBtn');
+    const meetingMessage = document.getElementById('meetingMessage');
+
+    function setAuthState(username, token) {
+      if (username && token) {
+        sessionStorage.setItem('authToken', token);
+        sessionStorage.setItem('username', username);
+        showDashboard();
+      } else {
+        sessionStorage.removeItem('authToken');
+        sessionStorage.removeItem('username');
+        meetingBlock.classList.add('hidden');
+        loginCard.classList.remove('hidden');
+        dashboardCard.classList.add('hidden');
+        loginForm.reset();
+        username && (document.getElementById('username').value = username);
+      }
+    }
+
+    function showDashboard() {
+      const username = sessionStorage.getItem('username');
+      if (!username) return;
+      welcomeHeading.textContent = `Logged in as ${username}`;
+      loginCard.classList.add('hidden');
+      dashboardCard.classList.remove('hidden');
+      loginError.classList.add('hidden');
+      meetingBlock.classList.add('hidden');
+      meetingMessage.textContent = '';
+    }
+
+    async function handleLogin(event) {
+      event.preventDefault();
+      loginError.classList.add('hidden');
+      const formData = new FormData(loginForm);
+      const payload = {
+        username: formData.get('username'),
+        password: formData.get('password'),
+      };
+
+      try {
+        const response = await fetch('/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || 'Failed to authenticate.');
+        }
+
+        setAuthState(data.username, data.token);
+      } catch (error) {
+        loginError.textContent = error.message;
+        loginError.classList.remove('hidden');
+      }
+    }
+
+    async function createMeeting() {
+      const token = sessionStorage.getItem('authToken');
+      if (!token) {
+        loginError.textContent = 'Session expired. Please log in again.';
+        loginError.classList.remove('hidden');
+        setAuthState();
+        return;
+      }
+
+      createMeetingBtn.disabled = true;
+      createMeetingBtn.textContent = 'Creating…';
+      meetingMessage.textContent = '';
+
+      try {
+        const response = await fetch('/api/meetings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || 'Unable to create meeting.');
+        }
+
+        const link = data.meetingUrl;
+        meetingLinkInput.value = link;
+        meetingBlock.classList.remove('hidden');
+        meetingMessage.textContent = 'Send this one-time link to your participant.';
+        openMeetingBtn.dataset.roomToken = data.token;
+      } catch (error) {
+        meetingMessage.textContent = error.message;
+        meetingBlock.classList.remove('hidden');
+      } finally {
+        createMeetingBtn.disabled = false;
+        createMeetingBtn.textContent = 'Create one-time meeting';
+      }
+    }
+
+    function copyMeetingLink() {
+      const link = meetingLinkInput.value;
+      if (!link) return;
+      navigator.clipboard.writeText(link)
+        .then(() => {
+          meetingMessage.textContent = 'Link copied to clipboard!';
+        })
+        .catch(() => {
+          meetingMessage.textContent = 'Unable to copy automatically. Copy it manually.';
+        });
+    }
+
+    function openMeeting() {
+      const token = openMeetingBtn.dataset.roomToken;
+      if (!token) return;
+      window.location.href = `/chat.html?room=${encodeURIComponent(token)}`;
+    }
+
+    loginForm.addEventListener('submit', handleLogin);
+    logoutBtn.addEventListener('click', () => {
+      setAuthState();
+    });
+    createMeetingBtn.addEventListener('click', createMeeting);
+    copyMeetingBtn.addEventListener('click', copyMeetingLink);
+    openMeetingBtn.addEventListener('click', openMeeting);
+
+    (function bootstrap() {
+      const token = sessionStorage.getItem('authToken');
+      const username = sessionStorage.getItem('username');
+      if (token && username) {
+        showDashboard();
+      }
+    })();
+  </script>
+</body>
+</html>

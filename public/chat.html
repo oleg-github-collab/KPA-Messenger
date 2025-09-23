@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Meeting | Simple AI Messenger</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="chat-body">
+  <div id="nameModal" class="modal hidden">
+    <div class="modal-content fade">
+      <h2>Enter your name</h2>
+      <p class="muted">This meeting link is one-time. Choose the name you want to display.</p>
+      <form id="nameForm">
+        <input id="displayNameInput" name="displayName" required maxlength="32" placeholder="Your name">
+        <button type="submit" class="primary">Join meeting</button>
+      </form>
+      <div id="nameError" class="error hidden"></div>
+    </div>
+  </div>
+
+  <header class="chat-header">
+    <div class="info">
+      <h1>Simple AI Messenger</h1>
+      <p class="muted" id="meetingSubtitle">Preparing meeting…</p>
+    </div>
+    <div class="controls">
+      <button id="copyLinkBtn" class="ghost">Copy invite link</button>
+      <button id="muteBtn" class="ghost">Mute</button>
+      <button id="videoBtn" class="ghost">Stop video</button>
+      <button id="endMeetingBtn" class="ghost hidden">End meeting</button>
+      <button id="leaveBtn" class="primary">Leave</button>
+    </div>
+  </header>
+
+  <main class="chat-main">
+    <section class="video-panel">
+      <div class="call-controls">
+        <span class="badge" id="roleBadge">Connecting…</span>
+        <div class="participants" id="participants"></div>
+      </div>
+      <div class="videos">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+      <div id="videoNotice" class="banner hidden"></div>
+    </section>
+
+    <section class="chat-panel">
+      <h2>Chat</h2>
+      <div id="messages" class="messages"></div>
+      <form id="chatForm">
+        <input id="chatInput" placeholder="Type a message" autocomplete="off">
+        <button class="primary" type="submit">Send</button>
+      </form>
+      <div id="chatNotice" class="banner hidden"></div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js" defer></script>
+</body>
+</html>
