@@ -1,23 +1,31 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Kaminskyi AI Messenger · Камінський AI Месенджер</title>
+  <title>Kaminskyi AI Messenger</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="auth-body">
+  <div class="language-switch" id="languageSelector">
+    <label for="languageChoice">Language / Мова</label>
+    <select id="languageChoice">
+      <option value="en">English</option>
+      <option value="uk">Українська</option>
+    </select>
+  </div>
+
   <main class="auth-container">
     <section class="card" id="loginCard">
-      <h1>Kaminskyi AI Messenger · Камінський AI Месенджер</h1>
-      <p class="muted">Sign in with the configured credentials to host a meeting. / Увійдіть за попередньо заданими даними, щоб створити зустріч.</p>
+      <h1 id="title"></h1>
+      <p class="muted" id="subtitle"></p>
       <form id="loginForm" class="stack-form" autocomplete="off">
-        <label for="username">Username / Ім’я користувача</label>
+        <label for="username" id="usernameLabel"></label>
         <input id="username" name="username" required placeholder="Oleh" autofocus>
 
-        <label for="password">Password / Пароль</label>
+        <label for="password" id="passwordLabel"></label>
         <input id="password" name="password" type="password" required placeholder="••••••">
 
-        <button type="submit" class="primary">Log In / Увійти</button>
+        <button type="submit" class="primary" id="loginButton"></button>
       </form>
       <div id="loginError" class="error hidden"></div>
     </section>
@@ -26,23 +34,23 @@
       <header class="card-header">
         <div>
           <h2 id="welcomeHeading"></h2>
-          <p class="muted">Generate one-time meeting links and share them like Google Meet. / Створюйте одноразові посилання і діліться ними, як у Google Meet.</p>
+          <p class="muted" id="dashboardSubtitle"></p>
         </div>
-        <button id="logoutBtn" class="ghost">Log out / Вийти</button>
+        <button id="logoutBtn" class="ghost"></button>
       </header>
 
       <div class="card-body">
-        <button id="createMeetingBtn" class="primary full-width">Create one-time meeting / Створити одноразову зустріч</button>
+        <button id="createMeetingBtn" class="primary full-width"></button>
 
         <div id="meetingBlock" class="meeting-block hidden">
-          <h3>Your meeting is ready / Зустріч готова</h3>
-          <p class="muted">Share this link with a participant. It stops working after the host ends the call. / Надішліть посилання учаснику. Воно перестає працювати після завершення зустрічі.</p>
+          <h3 id="meetingReadyHeading"></h3>
+          <p class="muted" id="meetingReadyText"></p>
           <div class="link-row">
             <input id="meetingLink" readonly>
-            <button id="copyMeetingBtn" class="ghost">Copy / Скопіювати</button>
+            <button id="copyMeetingBtn" class="ghost"></button>
           </div>
           <div class="actions-row">
-            <button id="openMeetingBtn" class="primary">Open meeting / Відкрити зустріч</button>
+            <button id="openMeetingBtn" class="primary"></button>
           </div>
           <div id="meetingMessage" class="muted"></div>
         </div>
@@ -51,16 +59,53 @@
   </main>
 
   <script>
-    const TEXT = {
-      loginHeading: 'Logged in as / Ви ввійшли як',
-      creating: 'Creating… / Створення…',
-      create: 'Create one-time meeting / Створити одноразову зустріч',
-      authError: 'Failed to authenticate. / Не вдалося авторизуватися.',
-      sessionExpired: 'Session expired. Please log in again. / Сеанс завершено. Увійдіть ще раз.',
-      linkReady: 'Send this one-time link to your participant. / Надішліть це одноразове посилання учаснику.',
-      linkCopied: 'Link copied to clipboard! / Посилання скопійовано!',
-      linkCopyError: 'Unable to copy automatically. Copy it manually. / Не вдалося скопіювати автоматично. Скопіюйте вручну.',
-      meetingError: 'Unable to create meeting. / Не вдалося створити зустріч.'
+    const translations = {
+      en: {
+        title: 'Kaminskyi AI Messenger',
+        subtitle: 'Sign in with your secure credentials to host a meeting.',
+        usernameLabel: 'Username',
+        passwordLabel: 'Password',
+        loginButton: 'Log In',
+        welcomeHeading: (user) => `Signed in as ${user}`,
+        dashboardSubtitle: 'Generate one-time meeting links and share them instantly.',
+        logout: 'Log out',
+        createMeeting: 'Create one-time meeting',
+        creating: 'Creating…',
+        meetingReadyHeading: 'Your meeting is ready',
+        meetingReadyText: 'Share this link with a participant. It stops working when the host ends the call.',
+        copy: 'Copy',
+        openMeeting: 'Open meeting',
+        linkReady: 'Send this one-time link to your participant.',
+        linkCopied: 'Link copied to clipboard!',
+        linkCopyError: 'Unable to copy automatically. Copy it manually.',
+        sessionExpired: 'Session expired. Please log in again.',
+        authError: 'Failed to authenticate.',
+        meetingError: 'Unable to create meeting.',
+        languageLabel: 'Language',
+      },
+      uk: {
+        title: 'Камінський AI Месенджер',
+        subtitle: 'Увійдіть за захищеними обліковими даними, щоб організувати зустріч.',
+        usernameLabel: 'Ім’я користувача',
+        passwordLabel: 'Пароль',
+        loginButton: 'Увійти',
+        welcomeHeading: (user) => `Увійшли як ${user}`,
+        dashboardSubtitle: 'Створюйте одноразові посилання на зустріч і миттєво діліться ними.',
+        logout: 'Вийти',
+        createMeeting: 'Створити одноразову зустріч',
+        creating: 'Створення…',
+        meetingReadyHeading: 'Зустріч готова',
+        meetingReadyText: 'Надішліть посилання учаснику. Воно перестає працювати після завершення зустрічі хостом.',
+        copy: 'Скопіювати',
+        openMeeting: 'Відкрити зустріч',
+        linkReady: 'Надішліть це одноразове посилання учаснику.',
+        linkCopied: 'Посилання скопійовано!',
+        linkCopyError: 'Не вдалося скопіювати автоматично. Скопіюйте вручну.',
+        sessionExpired: 'Сеанс завершено. Увійдіть ще раз.',
+        authError: 'Не вдалося авторизуватися.',
+        meetingError: 'Не вдалося створити зустріч.',
+        languageLabel: 'Мова',
+      },
     };
 
     const loginForm = document.getElementById('loginForm');
@@ -75,6 +120,49 @@
     const copyMeetingBtn = document.getElementById('copyMeetingBtn');
     const openMeetingBtn = document.getElementById('openMeetingBtn');
     const meetingMessage = document.getElementById('meetingMessage');
+    const langSelect = document.getElementById('languageChoice');
+    const langLabel = document.querySelector("label[for='languageChoice']");
+
+    let currentLang = localStorage.getItem('kaminskyi-lang') || 'en';
+    if (!translations[currentLang]) currentLang = 'en';
+    langSelect.value = currentLang;
+
+    function t(key, ...args) {
+      const value = translations[currentLang][key];
+      return typeof value === 'function' ? value(...args) : value;
+    }
+
+    function applyStaticText() {
+      document.documentElement.lang = currentLang;
+      document.title = t('title');
+      document.getElementById('title').textContent = t('title');
+      document.getElementById('subtitle').textContent = t('subtitle');
+      document.getElementById('usernameLabel').textContent = t('usernameLabel');
+      document.getElementById('passwordLabel').textContent = t('passwordLabel');
+      document.getElementById('loginButton').textContent = t('loginButton');
+      document.getElementById('dashboardSubtitle').textContent = t('dashboardSubtitle');
+      logoutBtn.textContent = t('logout');
+      createMeetingBtn.textContent = t('createMeeting');
+      document.getElementById('meetingReadyHeading').textContent = t('meetingReadyHeading');
+      document.getElementById('meetingReadyText').textContent = t('meetingReadyText');
+      copyMeetingBtn.textContent = t('copy');
+      openMeetingBtn.textContent = t('openMeeting');
+      langLabel.textContent = `${t('languageLabel')} / Language`;
+    }
+
+    function setLanguage(lang) {
+      if (!translations[lang]) return;
+      currentLang = lang;
+      localStorage.setItem('kaminskyi-lang', lang);
+      applyStaticText();
+    }
+
+    langSelect.addEventListener('change', (event) => {
+      setLanguage(event.target.value);
+      if (sessionStorage.getItem('username')) {
+        welcomeHeading.textContent = t('welcomeHeading', sessionStorage.getItem('username'));
+      }
+    });
 
     function setAuthState(username, token) {
       if (username && token) {
@@ -97,7 +185,7 @@
     function showDashboard() {
       const username = sessionStorage.getItem('username');
       if (!username) return;
-      welcomeHeading.textContent = `${TEXT.loginHeading} ${username}`;
+      welcomeHeading.textContent = t('welcomeHeading', username);
       loginCard.classList.add('hidden');
       dashboardCard.classList.remove('hidden');
       loginError.classList.add('hidden');
@@ -123,12 +211,12 @@
 
         const data = await response.json();
         if (!response.ok || !data.ok) {
-          throw new Error(data.message || TEXT.authError);
+          throw new Error(data.message || t('authError'));
         }
 
         setAuthState(data.username, data.token);
       } catch (error) {
-        loginError.textContent = error.message || TEXT.authError;
+        loginError.textContent = error.message || t('authError');
         loginError.classList.remove('hidden');
       }
     }
@@ -136,14 +224,14 @@
     async function createMeeting() {
       const token = sessionStorage.getItem('authToken');
       if (!token) {
-        loginError.textContent = TEXT.sessionExpired;
+        loginError.textContent = t('sessionExpired');
         loginError.classList.remove('hidden');
         setAuthState();
         return;
       }
 
       createMeetingBtn.disabled = true;
-      createMeetingBtn.textContent = TEXT.creating;
+      createMeetingBtn.textContent = t('creating');
       meetingMessage.textContent = '';
 
       try {
@@ -158,19 +246,19 @@
 
         const data = await response.json();
         if (!response.ok || !data.ok) {
-          throw new Error(data.message || TEXT.meetingError);
+          throw new Error(data.message || t('meetingError'));
         }
 
         meetingLinkInput.value = data.meetingUrl;
         meetingBlock.classList.remove('hidden');
-        meetingMessage.textContent = TEXT.linkReady;
+        meetingMessage.textContent = t('linkReady');
         openMeetingBtn.dataset.roomToken = data.token;
       } catch (error) {
-        meetingMessage.textContent = error.message || TEXT.meetingError;
+        meetingMessage.textContent = error.message || t('meetingError');
         meetingBlock.classList.remove('hidden');
       } finally {
         createMeetingBtn.disabled = false;
-        createMeetingBtn.textContent = TEXT.create;
+        createMeetingBtn.textContent = t('createMeeting');
       }
     }
 
@@ -180,13 +268,13 @@
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(link)
           .then(() => {
-            meetingMessage.textContent = TEXT.linkCopied;
+            meetingMessage.textContent = t('linkCopied');
           })
           .catch(() => {
-            meetingMessage.textContent = TEXT.linkCopyError;
+            meetingMessage.textContent = t('linkCopyError');
           });
       } else {
-        meetingMessage.textContent = TEXT.linkCopyError;
+        meetingMessage.textContent = t('linkCopyError');
       }
     }
 
@@ -205,6 +293,7 @@
     openMeetingBtn.addEventListener('click', openMeeting);
 
     (function bootstrap() {
+      applyStaticText();
       const token = sessionStorage.getItem('authToken');
       const username = sessionStorage.getItem('username');
       if (token && username) {
