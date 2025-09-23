@@ -442,13 +442,10 @@ async function streamAssistantResponse({
     const { value, done } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const segments = buffer.split('
-
-');
-    buffer = segments.pop();
+    const segments = buffer.split('\n\n');
+    buffer = segments.pop() || '';
     for (const segment of segments) {
-      const lines = segment.split('
-').filter(Boolean);
+      const lines = segment.split('\n').filter(Boolean);
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const payload = line.slice(6).trim();
