@@ -105,9 +105,22 @@ const TEXT = {
   joinFailed: 'Failed to join meeting. / Не вдалося приєднатися до зустрічі.',
   chatJoinRequired: 'You must join the meeting first. / Спершу приєднайтеся до зустрічі.',
   chatSendFailed: 'Failed to send message. / Не вдалося надіслати повідомлення.',
-  messagesFetchFailed: 'Failed to fetch messages. / Не вдалося отримати повідомлення.'
+  messagesFetchFailed: 'Failed to fetch messages. / Не вдалося отримати повідомлення.',
+  assistantDisabled: 'Assistant is not configured. / Асистента не налаштовано.',
+  assistantHostOnly: 'Only the host can call the assistant. / Лише хост може викликати асистента.',
+  assistantFailed: 'Assistant request failed. / Помилка під час запиту до асистента.',
+  assistantNoPrompt: 'Assistant prompt is empty. / Порожній запит до асистента.'
 };
 
+const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Valera';
+const ASSISTANT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const ASSISTANT_SYSTEM_PROMPT =
+  process.env.ASSISTANT_SYSTEM_PROMPT ||
+  `You are ${ASSISTANT_NAME}, an assistant that helps the meeting host with quick research and analysis. Use concise Ukrainian or English depending on the user input. Cite web search snippets when they are provided.`;
+const ASSISTANT_MAX_HISTORY = Number(process.env.ASSISTANT_HISTORY_LIMIT || 20);
+const ASSISTANT_SEARCH_ENABLED = process.env.ASSISTANT_SEARCH !== 'false';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
 const sessionStore = new Map();
 
 const validUsers = [
@@ -210,8 +223,8 @@ app.post('/api/meetings', async (req, res) => {
   try {
     const requestedMax = Number(req.body?.maxParticipants);
     const maxParticipants = Number.isFinite(requestedMax)
-      ? Math.min(Math.max(Math.trunc(requestedMax), 2), 8)
-      : 2;
+      ? Math.min(Math.max(Math.trunc(requestedMax), 2), 10)
+      : 10;
 
     let token;
     let insertResult;
@@ -317,6 +330,176 @@ app.get('/api/messages/:token', async (req, res) => {
   }
 });
 
+async function fetchRecentMessages(meetingId, limit = ASSISTANT_MAX_HISTORY) {
+  return allAsync(
+    'SELECT sender, text FROM messages WHERE meeting_id = ? ORDER BY id DESC LIMIT ?',
+    [meetingId, limit],
+  ).then((rows) => rows.reverse());
+}
+
+async function performWebSearch(query) {
+  if (!ASSISTANT_SEARCH_ENABLED) return null;
+  try {
+    const url = new URL('https://api.duckduckgo.com/');
+    url.searchParams.set('q', query);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('no_html', '1');
+    url.searchParams.set('skip_disambig', '1');
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    const snippets = [];
+    if (data.AbstractText) {
+      snippets.push(data.AbstractText);
+    }
+    if (Array.isArray(data.RelatedTopics)) {
+      for (const topic of data.RelatedTopics) {
+        if (topic && typeof topic.Text === 'string') {
+          snippets.push(topic.Text);
+        } else if (topic && Array.isArray(topic.Topics)) {
+          for (const nested of topic.Topics) {
+            if (nested && typeof nested.Text === 'string') {
+              snippets.push(nested.Text);
+            }
+          }
+        }
+        if (snippets.length >= 5) break;
+      }
+    }
+    if (!snippets.length) {
+      return null;
+    }
+    return snippets.slice(0, 5).map((snippet, index) => `${index + 1}. ${snippet}`).join('
+');
+  } catch (error) {
+    console.error('performWebSearch error', error);
+    return null;
+  }
+}
+
+async function buildAssistantMessages(meetingId, prompt, { searchSummary } = {}) {
+  const history = await fetchRecentMessages(meetingId, ASSISTANT_MAX_HISTORY);
+  const messages = [];
+  if (ASSISTANT_SYSTEM_PROMPT) {
+    messages.push({ role: 'system', content: ASSISTANT_SYSTEM_PROMPT });
+  }
+  for (const row of history) {
+    const role = row.sender === ASSISTANT_NAME ? 'assistant' : 'user';
+    messages.push({ role, content: `${row.sender}: ${row.text}` });
+  }
+  if (searchSummary) {
+    messages.push({
+      role: 'system',
+      content: `Real-time web search summary:
+${searchSummary}`,
+    });
+  }
+  messages.push({ role: 'user', content: prompt });
+  return messages;
+}
+
+async function streamAssistantResponse({
+  meetingId,
+  meetingToken,
+  prompt,
+  requestId,
+  withSearch,
+}) {
+  const context = { searchSummary: null };
+  if (withSearch) {
+    context.searchSummary = await performWebSearch(prompt);
+  }
+  const messages = await buildAssistantMessages(meetingId, prompt, context);
+  const body = JSON.stringify({
+    model: ASSISTANT_MODEL,
+    stream: true,
+    temperature: 0.4,
+    messages,
+  });
+
+  const response = await fetch(OPENAI_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body,
+  });
+
+  if (!response.ok || !response.body) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`OpenAI request failed: ${response.status} ${errorText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let doneStreaming = false;
+
+  while (!doneStreaming) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const segments = buffer.split('
+
+');
+    buffer = segments.pop();
+    for (const segment of segments) {
+      const lines = segment.split('
+').filter(Boolean);
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') {
+          doneStreaming = true;
+          break;
+        }
+        try {
+          const parsed = JSON.parse(payload);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullText += delta;
+            io.to(meetingToken).emit('assistant-chunk', {
+              requestId,
+              delta,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to parse assistant chunk', error);
+        }
+      }
+    }
+  }
+
+  fullText = fullText.trim();
+  if (!fullText) {
+    throw new Error('Assistant response empty');
+  }
+
+  const timestamp = new Date().toISOString();
+  await runAsync(
+    'INSERT INTO messages (meeting_id, sender, text, ts) VALUES (?, ?, ?, ?)',
+    [meetingId, ASSISTANT_NAME, fullText, timestamp],
+  );
+
+  io.to(meetingToken).emit('assistant-complete', {
+    requestId,
+    text: fullText,
+    ts: timestamp,
+    name: ASSISTANT_NAME,
+  });
+
+  io.to(meetingToken).emit('message', {
+    sender: ASSISTANT_NAME,
+    text: fullText,
+    ts: timestamp,
+    requestId,
+  });
+}
+
 io.on('connection', (socket) => {
   socket.on('join-room', async ({ meetingToken, displayName, authToken }) => {
     try {
@@ -339,59 +522,73 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const existingParticipants = await allAsync(
-        'SELECT name FROM participants WHERE meeting_id = ?',
-        [meeting.id],
-      );
 
-      const participantNames = existingParticipants.map((p) => p.name);
-      const alreadyParticipant = participantNames.includes(nameToUse);
+const existingParticipants = await allAsync(
+  'SELECT name FROM participants WHERE meeting_id = ?',
+  [meeting.id],
+);
 
-      if (!alreadyParticipant) {
-        if (existingParticipants.length >= meeting.max_participants) {
-          socket.emit('join-error', {
-            message: TEXT.meetingFull,
-          });
-          return;
-        }
+const participantNames = existingParticipants.map((p) => p.name);
+const alreadyParticipant = participantNames.includes(nameToUse);
 
-        try {
-          await runAsync('INSERT INTO participants (meeting_id, name) VALUES (?, ?)', [
-            meeting.id,
-            nameToUse,
-          ]);
-          participantNames.push(nameToUse);
-        } catch (err) {
-          if (err.code !== 'SQLITE_CONSTRAINT') {
-            throw err;
-          }
-        }
+if (!alreadyParticipant) {
+  if (existingParticipants.length >= meeting.max_participants) {
+    socket.emit('join-error', {
+      message: TEXT.meetingFull,
+    });
+    return;
+  }
 
-        if (meeting.status === 'pending') {
-          await runAsync('UPDATE meetings SET status = ? WHERE id = ?', ['active', meeting.id]);
-          meeting.status = 'active';
-        }
-      }
+  try {
+    await runAsync('INSERT INTO participants (meeting_id, name) VALUES (?, ?)', [
+      meeting.id,
+      nameToUse,
+    ]);
+    participantNames.push(nameToUse);
+  } catch (err) {
+    if (err.code !== 'SQLITE_CONSTRAINT') {
+      throw err;
+    }
+  }
 
-      socket.join(meeting.token);
-      socket.data.meetingId = meeting.id;
-      socket.data.meetingToken = meeting.token;
-      socket.data.name = nameToUse;
-      socket.data.isHost = isHost;
+  if (meeting.status === 'pending') {
+    await runAsync('UPDATE meetings SET status = ? WHERE id = ?', ['active', meeting.id]);
+    meeting.status = 'active';
+  }
+}
 
-      socket.emit('meeting-joined', {
-        meeting: {
-          token: meeting.token,
-          host: meeting.host,
-          status: meeting.status,
-          maxParticipants: meeting.max_participants,
-        },
-        participants: participantNames,
-        isHost,
-        self: nameToUse,
-      });
+const roomSockets = io.sockets.adapter.rooms.get(meeting.token) || new Set();
+const peerSummaries = [];
+for (const socketId of roomSockets) {
+  const peerSocket = io.sockets.sockets.get(socketId);
+  if (peerSocket && peerSocket.data?.meetingToken === meeting.token) {
+    peerSummaries.push({
+      socketId,
+      name: peerSocket.data.name,
+    });
+  }
+}
 
-      socket.to(meeting.token).emit('participant-joined', { name: nameToUse });
+socket.join(meeting.token);
+socket.data.meetingId = meeting.id;
+socket.data.meetingToken = meeting.token;
+socket.data.name = nameToUse;
+socket.data.isHost = isHost;
+
+socket.emit('meeting-joined', {
+  meeting: {
+    token: meeting.token,
+    host: meeting.host,
+    status: meeting.status,
+    maxParticipants: meeting.max_participants,
+  },
+  participants: participantNames,
+  peers: peerSummaries,
+  isHost,
+  self: nameToUse,
+});
+
+socket.to(meeting.token).emit('participant-joined', { name: nameToUse, socketId: socket.id });
     } catch (error) {
       if (error.status) {
         socket.emit('join-error', { message: error.message });
@@ -430,40 +627,106 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('webrtc-offer', (offer) => {
-    if (!socket.data.meetingToken) return;
-    socket.to(socket.data.meetingToken).emit('webrtc-offer', {
+  socket.on('assistant-query', async ({ prompt, requestId, withSearch }) => {
+    const trimmed = (prompt || '').trim();
+    const id = requestId || crypto.randomBytes(8).toString('hex');
+
+    if (!socket.data.meetingId || !socket.data.name) {
+      socket.emit('assistant-error', { requestId: id, message: TEXT.chatJoinRequired });
+      return;
+    }
+
+    if (!socket.data.isHost) {
+      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantHostOnly });
+      return;
+    }
+
+    if (!trimmed) {
+      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantNoPrompt });
+      return;
+    }
+
+    if (!OPENAI_API_KEY) {
+      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantDisabled });
+      return;
+    }
+
+    const shouldSearch =
+      typeof withSearch === 'boolean'
+        ? withSearch && ASSISTANT_SEARCH_ENABLED
+        : ASSISTANT_SEARCH_ENABLED;
+
+    io.to(socket.data.meetingToken).emit('assistant-start', {
+      requestId: id,
+      name: ASSISTANT_NAME,
       from: socket.data.name,
-      offer,
+      prompt: trimmed,
     });
+
+    try {
+      await streamAssistantResponse({
+        meetingId: socket.data.meetingId,
+        meetingToken: socket.data.meetingToken,
+        prompt: trimmed,
+        requestId: id,
+        withSearch: shouldSearch,
+      });
+    } catch (error) {
+      console.error('assistant-query failure', error);
+      io.to(socket.data.meetingToken).emit('assistant-error', {
+        requestId: id,
+        message: TEXT.assistantFailed,
+      });
+    }
   });
 
-  socket.on('webrtc-answer', (answer) => {
-    if (!socket.data.meetingToken) return;
-    socket.to(socket.data.meetingToken).emit('webrtc-answer', {
-      from: socket.data.name,
-      answer,
-    });
-  });
 
-  socket.on('webrtc-candidate', (candidate) => {
-    if (!socket.data.meetingToken) return;
-    socket.to(socket.data.meetingToken).emit('webrtc-candidate', {
-      from: socket.data.name,
-      candidate,
-    });
+socket.on('webrtc-offer', ({ targetId, offer }) => {
+  if (!socket.data.meetingToken || !targetId) return;
+  const target = io.sockets.sockets.get(targetId);
+  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
+  target.emit('webrtc-offer', {
+    from: socket.id,
+    name: socket.data.name,
+    offer,
   });
+});
+
+socket.on('webrtc-answer', ({ targetId, answer }) => {
+  if (!socket.data.meetingToken || !targetId) return;
+  const target = io.sockets.sockets.get(targetId);
+  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
+  target.emit('webrtc-answer', {
+    from: socket.id,
+    answer,
+  });
+});
+
+socket.on('webrtc-candidate', ({ targetId, candidate }) => {
+  if (!socket.data.meetingToken || !targetId || !candidate) return;
+  const target = io.sockets.sockets.get(targetId);
+  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
+  target.emit('webrtc-candidate', {
+    from: socket.id,
+    candidate,
+  });
+});
+
 
   socket.on('leave-meeting', async () => {
     if (!socket.data.meetingToken || !socket.data.name) return;
     socket.leave(socket.data.meetingToken);
-    socket.to(socket.data.meetingToken).emit('participant-left', { name: socket.data.name });
+    socket.to(socket.data.meetingToken).emit('participant-left', {
+      name: socket.data.name,
+      socketId: socket.id,
+    });
   });
 
   socket.on('disconnect', () => {
     if (socket.data.meetingToken && socket.data.name) {
       socket.to(socket.data.meetingToken).emit('participant-left', {
         name: socket.data.name,
+        socketId: socket.id,
       });
     }
   });

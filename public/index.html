@@ -42,6 +42,12 @@
       <div class="card-body">
         <button id="createMeetingBtn" class="primary full-width"></button>
 
+        <div class="meeting-options" id="meetingOptions">
+          <label for="maxParticipants" id="capacityLabel"></label>
+          <input type="range" id="maxParticipants" min="2" max="10" value="10">
+          <div class="range-value" id="capacityValue"></div>
+        </div>
+
         <div id="meetingBlock" class="meeting-block hidden">
           <h3 id="meetingReadyHeading"></h3>
           <p class="muted" id="meetingReadyText"></p>
@@ -70,6 +76,8 @@
         dashboardSubtitle: 'Generate one-time meeting links and share them instantly.',
         logout: 'Log out',
         createMeeting: 'Create one-time meeting',
+        capacityLabel: 'Meeting capacity',
+        capacityValue: (count) => `${count} participants`,
         creating: 'Creating…',
         meetingReadyHeading: 'Your meeting is ready',
         meetingReadyText: 'Share this link with a participant. It stops working when the host ends the call.',
@@ -97,6 +105,8 @@
         meetingReadyHeading: 'Зустріч готова',
         meetingReadyText: 'Надішліть посилання учаснику. Воно перестає працювати після завершення зустрічі хостом.',
         copy: 'Скопіювати',
+        capacityLabel: 'Місткість зустрічі',
+        capacityValue: (count) => `${count} учасників`,
         openMeeting: 'Відкрити зустріч',
         linkReady: 'Надішліть це одноразове посилання учаснику.',
         linkCopied: 'Посилання скопійовано!',
@@ -120,6 +130,9 @@
     const copyMeetingBtn = document.getElementById('copyMeetingBtn');
     const openMeetingBtn = document.getElementById('openMeetingBtn');
     const meetingMessage = document.getElementById('meetingMessage');
+    const maxParticipantsInput = document.getElementById('maxParticipants');
+    const capacityLabel = document.getElementById('capacityLabel');
+    const capacityValue = document.getElementById('capacityValue');
     const langSelect = document.getElementById('languageChoice');
     const langLabel = document.querySelector("label[for='languageChoice']");
 
@@ -130,6 +143,11 @@
     function t(key, ...args) {
       const value = translations[currentLang][key];
       return typeof value === 'function' ? value(...args) : value;
+    }
+
+    function updateCapacityDisplay() {
+      const value = Number(maxParticipantsInput.value);
+      capacityValue.textContent = translations[currentLang].capacityValue(value);
     }
 
     function applyStaticText() {
@@ -143,6 +161,8 @@
       document.getElementById('dashboardSubtitle').textContent = t('dashboardSubtitle');
       logoutBtn.textContent = t('logout');
       createMeetingBtn.textContent = t('createMeeting');
+      capacityLabel.textContent = t('capacityLabel');
+      updateCapacityDisplay();
       document.getElementById('meetingReadyHeading').textContent = t('meetingReadyHeading');
       document.getElementById('meetingReadyText').textContent = t('meetingReadyText');
       copyMeetingBtn.textContent = t('copy');
@@ -235,13 +255,14 @@
       meetingMessage.textContent = '';
 
       try {
+        const capacity = Number(maxParticipantsInput.value);
         const response = await fetch('/api/meetings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ maxParticipants: capacity }),
         });
 
         const data = await response.json();
@@ -251,7 +272,7 @@
 
         meetingLinkInput.value = data.meetingUrl;
         meetingBlock.classList.remove('hidden');
-        meetingMessage.textContent = t('linkReady');
+        meetingMessage.textContent = `${t('linkReady')} ${translations[currentLang].capacityValue(capacity)}`;
         openMeetingBtn.dataset.roomToken = data.token;
       } catch (error) {
         meetingMessage.textContent = error.message || t('meetingError');
@@ -291,6 +312,7 @@
     createMeetingBtn.addEventListener('click', createMeeting);
     copyMeetingBtn.addEventListener('click', copyMeetingLink);
     openMeetingBtn.addEventListener('click', openMeeting);
+    maxParticipantsInput.addEventListener('input', updateCapacityDisplay);
 
     (function bootstrap() {
       applyStaticText();
