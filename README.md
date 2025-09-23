@@ -1,36 +1,41 @@
-# Simple AI Messenger
+# Kaminskyi AI Messenger
 
-A tiny Google Meet style messenger: two predefined users can authenticate, generate one-time meeting links, chat with persistence, and hop on a WebRTC call. Socket.IO handles real-time messaging + signaling, SQLite keeps message history, and credentials live in environment variables ready for Railway deployment.
+Двомовний (uk/en) месенджер у стилі Google Meet: хост (Oleh) авторизується за наперед заданими обліковими даними, генерує одноразові посилання на зустрічі, спілкується у текстовому чаті й миттєво під’єднується до відео/аудіо виклику з гостем. Socket.IO відповідає за сигналінг WebRTC та обмін повідомленнями, SQLite зберігає історію зустрічі, а Railway легко приймає застосунок у продакшн.
 
-## Features
-- One-time meeting links with automatic expiration once the host ends the call.
-- Two-factor authentication via pre-provisioned credentials defined in `.env`.
-- Real-time text chat stored per meeting in SQLite.
-- WebRTC video/audio with STUN defaults; drop in TURN credentials if required.
-- Copy/share invite links, mute/video toggles, host-only “end meeting” control.
+A bilingual (uk/en) Google Meet–style messenger: the host (Oleh) authenticates with pre-provisioned credentials, generates single-use meeting links, chats in real time, and jumps on a WebRTC call with a guest. Socket.IO handles signaling + messaging, SQLite keeps per-meeting history, and Railway deployment stays straightforward.
 
-## Quick start
-1. Install dependencies:
+## Основні можливості / Key features
+- 🔐 Авторизація тільки для двох акаунтів (Oleh і Guest) через значення `.env`.
+- 🔗 Генерація одноразових посилань на зустріч, які перестають працювати після завершення.
+- 💬 Миттєві текстові повідомлення збережені у SQLite для кожної зустрічі.
+- 🎥 WebRTC відео/аудіо виклики з попередньо налаштованим STUN; можна додати TURN.
+- 🖥️ Повністю двомовний UI (українська + англійська) для входу й кімнати.
+- ☁️ Railway-ready конфіг: `railway.json`, `package.json` зі `start`/`build`.
+
+## Швидкий старт локально / Quick local start
+1. Встановіть залежності / Install dependencies
    ```bash
    npm install
    ```
-2. Copy the sample environment file and adjust credentials:
+2. Створіть файл `.env` з прикладу / Copy `.env.example` to `.env`
    ```bash
    cp .env.example .env
    ```
-3. Run the server:
+3. Запустіть сервер / Run the server
    ```bash
    npm start
    ```
-4. Open <http://localhost:3000> and log in as `alice`/`secret123` (or the credentials you set).
-5. Create a meeting link, share it, and join the room. Guests just need the link and a display name.
+4. Відкрийте / Open <http://localhost:3000>.
+5. Увійдіть / Log in як `Oleh` / `chugunnYSkorohod362210$`.
+6. Створіть посилання, поділіться ним і приєднайтесь до зустрічі. Гість лише вводить ім’я.
 
-## Railway deployment
-- Railway auto-detects the Node.js project. Push the repo, add environment variables (`PORT`, `USER*_NAME`, `USER*_PASS`, optionally `SESSION_TTL_MS`), and deploy.
-- Enable a persistent volume if you want to retain `db.sqlite` chat history between deploys.
+## Деплой на Railway / Railway deployment
+- Railway автоматично визначає Node.js проєкт, але ми також додали `railway.json` із командами `npm install` (build) та `npm start` (deploy), щоб уникнути помилки «Script start.sh not found».
+- Додайте середовищні змінні (див. `.env.example`) у проєкті Railway.
+- За потреби підключіть persistent volume, щоб зберігати `db.sqlite` між розгортаннями.
 
-## TURN server (optional but recommended)
-Pure STUN works when both peers are on permissive networks. For reliability behind strict NAT/firewalls, configure TURN credentials and extend the ICE server list in `public/client.js`.
+## TURN сервер / TURN server
+WebRTC через один STUN працює, якщо мережа не надто сувора. Для стабільної роботи за NAT додайте власні креденшали у `public/client.js` (масив `iceServers`).
 
 ---
-Built with care for quick, secure two-person calls.
+Made for seamless bilingual calls between Oleh and invited guests.

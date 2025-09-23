@@ -1,18 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="utf-8">
-  <title>Meeting | Simple AI Messenger</title>
+  <title>Kaminskyi AI Messenger · Камінський AI Месенджер — Meeting / Зустріч</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="chat-body">
   <div id="nameModal" class="modal hidden">
     <div class="modal-content fade">
-      <h2>Enter your name</h2>
-      <p class="muted">This meeting link is one-time. Choose the name you want to display.</p>
+      <h2>Enter your name / Введіть ім’я</h2>
+      <p class="muted">This link can be used once. Choose the name to display. / Це одноразове посилання. Оберіть ім’я, яке буде видно іншим.</p>
       <form id="nameForm">
-        <input id="displayNameInput" name="displayName" required maxlength="32" placeholder="Your name">
-        <button type="submit" class="primary">Join meeting</button>
+        <input id="displayNameInput" name="displayName" required maxlength="32" placeholder="Your name / Ваше ім’я">
+        <button type="submit" class="primary">Join meeting / Приєднатися</button>
       </form>
       <div id="nameError" class="error hidden"></div>
     </div>
@@ -20,22 +20,22 @@
 
   <header class="chat-header">
     <div class="info">
-      <h1>Simple AI Messenger</h1>
-      <p class="muted" id="meetingSubtitle">Preparing meeting…</p>
+      <h1>Kaminskyi AI Messenger · Камінський AI Месенджер</h1>
+      <p class="muted" id="meetingSubtitle">Preparing meeting… / Підготовка зустрічі…</p>
     </div>
     <div class="controls">
-      <button id="copyLinkBtn" class="ghost">Copy invite link</button>
-      <button id="muteBtn" class="ghost">Mute</button>
-      <button id="videoBtn" class="ghost">Stop video</button>
-      <button id="endMeetingBtn" class="ghost hidden">End meeting</button>
-      <button id="leaveBtn" class="primary">Leave</button>
+      <button id="copyLinkBtn" class="ghost">Copy invite link / Скопіювати запрошення</button>
+      <button id="muteBtn" class="ghost">Mute / Вимкнути звук</button>
+      <button id="videoBtn" class="ghost">Stop video / Вимкнути відео</button>
+      <button id="endMeetingBtn" class="ghost hidden">End meeting / Завершити зустріч</button>
+      <button id="leaveBtn" class="primary">Leave / Вийти</button>
     </div>
   </header>
 
   <main class="chat-main">
     <section class="video-panel">
       <div class="call-controls">
-        <span class="badge" id="roleBadge">Connecting…</span>
+        <span class="badge" id="roleBadge">Connecting… / Підключення…</span>
         <div class="participants" id="participants"></div>
       </div>
       <div class="videos">
@@ -46,11 +46,11 @@
     </section>
 
     <section class="chat-panel">
-      <h2>Chat</h2>
+      <h2>Chat / Чат</h2>
       <div id="messages" class="messages"></div>
       <form id="chatForm">
-        <input id="chatInput" placeholder="Type a message" autocomplete="off">
-        <button class="primary" type="submit">Send</button>
+        <input id="chatInput" placeholder="Type a message / Введіть повідомлення" autocomplete="off">
+        <button class="primary" type="submit">Send / Надіслати</button>
       </form>
       <div id="chatNotice" class="banner hidden"></div>
     </section>

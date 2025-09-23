@@ -37,9 +37,42 @@ const ui = {
   chatNotice: document.getElementById('chatNotice'),
 };
 
+const TEXT = {
+  invalidLink: 'Invalid meeting link. / Невірне посилання на зустріч.',
+  meetingUnavailable: 'Meeting unavailable. / Зустріч недоступна.',
+  offlineBadge: 'Offline / Офлайн',
+  hostLabel: (host) => `Host / Хост: ${host}`,
+  docTitle: (host) => `Kaminskyi AI Messenger — Meeting with ${host} / Зустріч з ${host}`,
+  linkReady: (token) => `Meeting link ready: ${token} / Посилання на зустріч: ${token}`,
+  readyHint: 'Ready. Share the link when you are in the meeting. / Готово. Поділіться посиланням, коли будете в зустрічі.',
+  joined: 'You joined the meeting. / Ви приєдналися до зустрічі.',
+  participantJoined: (name) => `${name} joined the meeting. / ${name} приєднався(-лася) до зустрічі.`,
+  participantLeft: (name) => `${name} left the meeting. / ${name} покинув(-ла) зустріч.`,
+  remoteConnected: 'Remote participant connected. / Віддалений учасник під’єднався.',
+  remoteLeft: 'Remote participant left the call. / Віддалений учасник покинув дзвінок.',
+  reconnection: 'Connection lost. Waiting for reconnection… / Зв’язок втрачено. Очікуємо повторне підключення…',
+  enableMedia: 'Enable camera and microphone to start the call. / Увімкніть камеру та мікрофон, щоб розпочати дзвінок.',
+  mediaPermissionDenied: 'Camera or microphone permission denied. / Доступ до камери чи мікрофона заборонений.',
+  linkCopied: 'Link copied to clipboard. / Посилання скопійовано до буфера обміну.',
+  linkCopyError: 'Unable to copy automatically. Copy it manually. / Не вдалося скопіювати автоматично. Скопіюйте вручну.',
+  clipboardUnavailable: 'Clipboard access unavailable. Copy the link from the address bar. / Доступ до буфера обміну недоступний. Скопіюйте посилання з адресного рядка.',
+  meetingEnded: 'Meeting ended. You can close this tab. / Зустріч завершено. Можете закрити вкладку.',
+  unableToEnd: 'Unable to end meeting. / Не вдалося завершити зустріч.',
+  unableToJoin: 'Unable to join meeting. / Не вдалося приєднатися до зустрічі.',
+  nameRequired: 'Name is required. / Потрібно вказати ім’я.',
+  waiting: 'Waiting to join… / Очікуємо приєднання…',
+  mute: 'Mute / Вимкнути звук',
+  unmute: 'Unmute / Увімкнути звук',
+  stopVideo: 'Stop video / Вимкнути відео',
+  startVideo: 'Start video / Увімкнути відео',
+  hostBadge: 'Host / Хост',
+  guestBadge: 'Guest / Гість'
+};
+
+
 function requireToken() {
   if (!state.meetingToken) {
-    showFatal('Invalid meeting link.');
+    showFatal(TEXT.invalidLink);
     throw new Error('Meeting token missing');
   }
 }
@@ -50,7 +83,7 @@ function showFatal(message) {
   ui.chatNotice.classList.add('error');
   toggleForm(false);
   toggleControls(false);
-  ui.roleBadge.textContent = 'Offline';
+  ui.roleBadge.textContent = TEXT.offlineBadge;
   if (!ui.nameModal.classList.contains('hidden')) {
     ui.nameModal.classList.add('hidden');
   }
@@ -78,12 +111,12 @@ async function prefetchMeeting() {
     const response = await fetch(`/api/meetings/${encodeURIComponent(state.meetingToken)}`);
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.message || 'Meeting unavailable.');
+      throw new Error(data.message || TEXT.meetingUnavailable);
     }
 
     const meeting = data.meeting;
-    ui.meetingSubtitle.textContent = `Host: ${meeting.host}`;
-    document.title = `Meeting with ${meeting.host}`;
+    ui.meetingSubtitle.textContent = TEXT.hostLabel(meeting.host);
+    document.title = TEXT.docTitle(meeting.host);
 
     state.participants = new Set(data.participants);
     renderParticipants();
@@ -170,14 +203,14 @@ async function ensurePeerConnection() {
     if (stream) {
       state.remoteStream = stream;
       ui.remoteVideo.srcObject = stream;
-      notifyVideo('Remote participant connected.');
+      notifyVideo(TEXT.remoteConnected);
     }
   };
 
   state.pc.onconnectionstatechange = () => {
     if (['disconnected', 'failed'].includes(state.pc.connectionState)) {
       state.callActive = false;
-      notifyVideo('Connection lost. Waiting for reconnection…', true);
+      notifyVideo(TEXT.reconnection, true);
     }
   };
 
@@ -195,11 +228,11 @@ async function ensureLocalStream() {
   try {
     state.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     ui.localVideo.srcObject = state.localStream;
-    ui.muteBtn.textContent = 'Mute';
-    ui.videoBtn.textContent = 'Stop video';
+    ui.muteBtn.textContent = TEXT.mute;
+    ui.videoBtn.textContent = TEXT.stopVideo;
     return state.localStream;
   } catch (error) {
-    notifyVideo('Camera or microphone permission denied.', true);
+    notifyVideo(TEXT.mediaPermissionDenied, true);
     throw error;
   }
 }
@@ -265,7 +298,7 @@ function toggleAudio() {
   state.localStream.getAudioTracks().forEach((track) => {
     track.enabled = !hasEnabled;
   });
-  ui.muteBtn.textContent = hasEnabled ? 'Unmute' : 'Mute';
+  ui.muteBtn.textContent = hasEnabled ? TEXT.unmute : TEXT.mute;
 }
 
 function toggleVideo() {
@@ -274,7 +307,7 @@ function toggleVideo() {
   state.localStream.getVideoTracks().forEach((track) => {
     track.enabled = !hasEnabled;
   });
-  ui.videoBtn.textContent = hasEnabled ? 'Start video' : 'Stop video';
+  ui.videoBtn.textContent = hasEnabled ? TEXT.startVideo : TEXT.stopVideo;
 }
 
 async function endMeeting() {
@@ -287,8 +320,8 @@ async function endMeeting() {
       },
     });
     if (!response.ok) {
-      const data = await response.json().catch(() => ({ message: 'Unable to end meeting.' }));
-      throw new Error(data.message || 'Unable to end meeting.');
+      const data = await response.json().catch(() => ({ message: TEXT.unableToEnd }));
+      throw new Error(data.message || TEXT.unableToEnd);
     }
     handleMeetingEnded();
   } catch (error) {
@@ -297,7 +330,7 @@ async function endMeeting() {
 }
 
 function handleMeetingEnded() {
-  notifyChat('Meeting ended. You can close this tab.', false);
+  notifyChat(TEXT.meetingEnded, false);
   toggleForm(false);
   toggleControls(false);
   cleanupMedia();
@@ -336,9 +369,9 @@ function leaveMeeting() {
 
 function updateBadge() {
   if (state.isHost) {
-    ui.roleBadge.textContent = 'Host';
+    ui.roleBadge.textContent = TEXT.hostBadge;
   } else {
-    ui.roleBadge.textContent = 'Guest';
+    ui.roleBadge.textContent = TEXT.guestBadge;
   }
 }
 
@@ -357,10 +390,10 @@ function copyMeetingLink() {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard
       .writeText(link)
-      .then(() => notifyChat('Link copied to clipboard.'))
-      .catch(() => notifyChat('Unable to copy automatically. Copy it manually.', true));
+      .then(() => notifyChat(TEXT.linkCopied))
+      .catch(() => notifyChat(TEXT.linkCopyError, true));
   } else {
-    notifyChat('Clipboard access unavailable. Copy the link from the address bar.', true);
+    notifyChat(TEXT.clipboardUnavailable, true);
   }
 }
 
@@ -368,7 +401,7 @@ socket.on('join-error', ({ message }) => {
   state.joining = false;
   ui.nameError.textContent = message;
   ui.nameError.classList.remove('hidden');
-  showFatal(message || 'Unable to join meeting.');
+  showFatal(message || TEXT.unableToJoin);
 });
 
 socket.on('meeting-joined', async ({ meeting, participants, isHost, self }) => {
@@ -380,16 +413,16 @@ socket.on('meeting-joined', async ({ meeting, participants, isHost, self }) => {
   updateBadge();
   hideNameModal();
   ui.endMeetingBtn.classList.toggle('hidden', !isHost);
-  ui.meetingSubtitle.textContent = `Meeting link ready: ${meeting.token}`;
+  ui.meetingSubtitle.textContent = TEXT.linkReady(meeting.token);
   toggleForm(true);
   toggleControls(true);
-  notifyChat('You joined the meeting.');
+  notifyChat(TEXT.joined);
 
   await ensureLocalStream().catch(() => {});
   await loadHistory();
 
   if (!state.localStream) {
-    notifyVideo('Enable camera and microphone to start the call.', true);
+    notifyVideo(TEXT.enableMedia, true);
   } else if (state.isHost) {
     maybeStartCall();
   }
@@ -399,7 +432,7 @@ socket.on('participant-joined', ({ name }) => {
   if (!name || name === state.displayName) return;
   state.participants.add(name);
   renderParticipants();
-  notifyChat(`${name} joined the meeting.`);
+  notifyChat(TEXT.participantJoined(name));
   if (state.isHost) {
     maybeStartCall();
   }
@@ -409,9 +442,9 @@ socket.on('participant-left', ({ name }) => {
   if (!name || name === state.displayName) return;
   state.participants.delete(name);
   renderParticipants();
-  notifyChat(`${name} left the meeting.`);
+  notifyChat(TEXT.participantLeft(name));
   state.callActive = false;
-  notifyVideo('Remote participant left the call.', true);
+  notifyVideo(TEXT.remoteLeft, true);
   if (state.remoteStream) {
     state.remoteStream.getTracks().forEach((track) => track.stop());
     state.remoteStream = null;
@@ -455,7 +488,7 @@ ui.nameForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const name = ui.nameInput.value.trim();
   if (!name) {
-    ui.nameError.textContent = 'Name is required.';
+    ui.nameError.textContent = TEXT.nameRequired;
     ui.nameError.classList.remove('hidden');
     return;
   }
@@ -486,7 +519,7 @@ window.addEventListener('beforeunload', () => {
   try {
     requireToken();
     await prefetchMeeting();
-    notifyChat('Ready. Share the link when you are in the meeting.');
+    notifyChat(TEXT.readyHint);
 
     if (state.authToken) {
       joinMeeting(sessionStorage.getItem('username'));

@@ -89,6 +89,25 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 8);
+
+const TEXT = {
+  usernamePasswordRequired: 'Username and password required. / Потрібно вказати ім’я користувача та пароль.',
+  invalidCredentials: 'Invalid credentials. / Невірні облікові дані.',
+  authRequired: 'Authentication required. / Потрібна автентифікація.',
+  meetingCreateFailed: 'Failed to create meeting. / Не вдалося створити зустріч.',
+  meetingFetchFailed: 'Failed to fetch meeting. / Не вдалося отримати дані зустрічі.',
+  meetingNotFound: 'Meeting not found. / Зустріч не знайдена.',
+  meetingEnded: 'Meeting has already ended. / Зустріч уже завершена.',
+  meetingEndFailed: 'Failed to end meeting. / Не вдалося завершити зустріч.',
+  meetingEndForbidden: 'Only the host can end the meeting. / Лише хост може завершити зустріч.',
+  meetingFull: 'Meeting is full or the link has already been used. / Зустріч заповнена або посилання вже використано.',
+  displayNameRequired: 'Display name is required to join. / Щоб приєднатися, потрібно вказати ім’я.',
+  joinFailed: 'Failed to join meeting. / Не вдалося приєднатися до зустрічі.',
+  chatJoinRequired: 'You must join the meeting first. / Спершу приєднайтеся до зустрічі.',
+  chatSendFailed: 'Failed to send message. / Не вдалося надіслати повідомлення.',
+  messagesFetchFailed: 'Failed to fetch messages. / Не вдалося отримати повідомлення.'
+};
+
 const sessionStore = new Map();
 
 const validUsers = [
@@ -142,7 +161,7 @@ function authenticate(req) {
 app.post('/auth', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
-    return res.status(400).json({ ok: false, message: 'Username and password required.' });
+    return res.status(400).json({ ok: false, message: TEXT.usernamePasswordRequired });
   }
 
   const matchedUser = validUsers.find(
@@ -150,7 +169,7 @@ app.post('/auth', (req, res) => {
   );
 
   if (!matchedUser) {
-    return res.status(401).json({ ok: false, message: 'Invalid credentials.' });
+    return res.status(401).json({ ok: false, message: TEXT.invalidCredentials });
   }
 
   const token = createSession(username);
@@ -159,12 +178,12 @@ app.post('/auth', (req, res) => {
 
 function assertMeetingActive(meeting) {
   if (!meeting) {
-    const error = new Error('Meeting not found.');
+    const error = new Error(TEXT.meetingNotFound);
     error.status = 404;
     throw error;
   }
   if (meeting.status === 'ended') {
-    const error = new Error('Meeting has already ended.');
+    const error = new Error(TEXT.meetingEnded);
     error.status = 410;
     throw error;
   }
@@ -185,7 +204,7 @@ function generateMeetingToken() {
 app.post('/api/meetings', async (req, res) => {
   const session = authenticate(req);
   if (!session) {
-    return res.status(401).json({ ok: false, message: 'Authentication required.' });
+    return res.status(401).json({ ok: false, message: TEXT.authRequired });
   }
 
   try {
@@ -219,7 +238,7 @@ app.post('/api/meetings', async (req, res) => {
     res.status(201).json({ ok: true, token, meetingUrl });
   } catch (error) {
     console.error('Failed to create meeting', error);
-    res.status(500).json({ ok: false, message: 'Failed to create meeting.' });
+    res.status(500).json({ ok: false, message: TEXT.meetingCreateFailed });
   }
 });
 
@@ -249,23 +268,23 @@ app.get('/api/meetings/:token', async (req, res) => {
       return res.status(error.status).json({ ok: false, message: error.message });
     }
     console.error('Failed to fetch meeting', error);
-    res.status(500).json({ ok: false, message: 'Failed to fetch meeting.' });
+    res.status(500).json({ ok: false, message: TEXT.meetingFetchFailed });
   }
 });
 
 app.post('/api/meetings/:token/end', async (req, res) => {
   const session = authenticate(req);
   if (!session) {
-    return res.status(401).json({ ok: false, message: 'Authentication required.' });
+    return res.status(401).json({ ok: false, message: TEXT.authRequired });
   }
 
   try {
     const meeting = await getMeetingByToken(req.params.token);
     if (!meeting) {
-      return res.status(404).json({ ok: false, message: 'Meeting not found.' });
+      return res.status(404).json({ ok: false, message: TEXT.meetingNotFound });
     }
     if (meeting.host !== session.username) {
-      return res.status(403).json({ ok: false, message: 'Only the host can end the meeting.' });
+      return res.status(403).json({ ok: false, message: TEXT.meetingEndForbidden });
     }
 
     await runAsync('UPDATE meetings SET status = ? WHERE id = ?', ['ended', meeting.id]);
@@ -275,7 +294,7 @@ app.post('/api/meetings/:token/end', async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     console.error('Failed to end meeting', error);
-    res.status(500).json({ ok: false, message: 'Failed to end meeting.' });
+    res.status(500).json({ ok: false, message: TEXT.meetingEndFailed });
   }
 });
 
@@ -283,7 +302,7 @@ app.get('/api/messages/:token', async (req, res) => {
   try {
     const meeting = await getMeetingByToken(req.params.token);
     if (!meeting) {
-      return res.status(404).json({ ok: false, message: 'Meeting not found.' });
+      return res.status(404).json({ ok: false, message: TEXT.meetingNotFound });
     }
 
     const messages = await allAsync(
@@ -294,7 +313,7 @@ app.get('/api/messages/:token', async (req, res) => {
     res.json({ ok: true, messages });
   } catch (error) {
     console.error('Failed to fetch messages', error);
-    res.status(500).json({ ok: false, message: 'Failed to fetch messages.' });
+    res.status(500).json({ ok: false, message: TEXT.messagesFetchFailed });
   }
 });
 
@@ -316,7 +335,7 @@ io.on('connection', (socket) => {
       }
 
       if (!nameToUse) {
-        socket.emit('join-error', { message: 'Display name is required to join.' });
+        socket.emit('join-error', { message: TEXT.displayNameRequired });
         return;
       }
 
@@ -331,7 +350,7 @@ io.on('connection', (socket) => {
       if (!alreadyParticipant) {
         if (existingParticipants.length >= meeting.max_participants) {
           socket.emit('join-error', {
-            message: 'Meeting is full or the link has already been used.',
+            message: TEXT.meetingFull,
           });
           return;
         }
@@ -378,14 +397,14 @@ io.on('connection', (socket) => {
         socket.emit('join-error', { message: error.message });
       } else {
         console.error('join-room error', error);
-        socket.emit('join-error', { message: 'Failed to join meeting.' });
+        socket.emit('join-error', { message: TEXT.joinFailed });
       }
     }
   });
 
   socket.on('chat-message', async ({ text }) => {
     if (!socket.data.meetingId || !socket.data.name) {
-      socket.emit('chat-error', { message: 'You must join the meeting first.' });
+      socket.emit('chat-error', { message: TEXT.chatJoinRequired });
       return;
     }
 
@@ -407,7 +426,7 @@ io.on('connection', (socket) => {
       });
     } catch (error) {
       console.error('Failed to persist message', error);
-      socket.emit('chat-error', { message: 'Failed to send message.' });
+      socket.emit('chat-error', { message: TEXT.chatSendFailed });
     }
   });
 

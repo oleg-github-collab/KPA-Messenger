@@ -1,11 +1,12 @@
 {
-  "name": "simple-ai-messenger",
+  "name": "kaminskyi-ai-messenger",
   "version": "1.0.0",
-  "description": "Two-user messenger with one-time meeting links, WebRTC calling, and Socket.IO signaling.",
+  "description": "Kaminskyi AI Messenger with one-time meeting links, WebRTC calling, and bilingual UI.",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "build": "npm install"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -15,5 +16,9 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.3"
+  },
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

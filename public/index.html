@@ -1,23 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
   <meta charset="utf-8">
-  <title>Simple AI Messenger</title>
+  <title>Kaminskyi AI Messenger · Камінський AI Месенджер</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="auth-body">
   <main class="auth-container">
     <section class="card" id="loginCard">
-      <h1>Simple AI Messenger</h1>
-      <p class="muted">Sign in with pre-configured credentials to host a meeting.</p>
+      <h1>Kaminskyi AI Messenger · Камінський AI Месенджер</h1>
+      <p class="muted">Sign in with the configured credentials to host a meeting. / Увійдіть за попередньо заданими даними, щоб створити зустріч.</p>
       <form id="loginForm" class="stack-form" autocomplete="off">
-        <label for="username">Username</label>
-        <input id="username" name="username" required placeholder="alice" autofocus>
+        <label for="username">Username / Ім’я користувача</label>
+        <input id="username" name="username" required placeholder="Oleh" autofocus>
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" required placeholder="secret123">
+        <label for="password">Password / Пароль</label>
+        <input id="password" name="password" type="password" required placeholder="••••••">
 
-        <button type="submit" class="primary">Log In</button>
+        <button type="submit" class="primary">Log In / Увійти</button>
       </form>
       <div id="loginError" class="error hidden"></div>
     </section>
@@ -26,23 +26,23 @@
       <header class="card-header">
         <div>
           <h2 id="welcomeHeading"></h2>
-          <p class="muted">Generate one-time meeting links and share them just like Google Meet.</p>
+          <p class="muted">Generate one-time meeting links and share them like Google Meet. / Створюйте одноразові посилання і діліться ними, як у Google Meet.</p>
         </div>
-        <button id="logoutBtn" class="ghost">Log out</button>
+        <button id="logoutBtn" class="ghost">Log out / Вийти</button>
       </header>
 
       <div class="card-body">
-        <button id="createMeetingBtn" class="primary full-width">Create one-time meeting</button>
+        <button id="createMeetingBtn" class="primary full-width">Create one-time meeting / Створити одноразову зустріч</button>
 
         <div id="meetingBlock" class="meeting-block hidden">
-          <h3>Your meeting is ready</h3>
-          <p class="muted">Share this link with a participant. It expires after the meeting ends.</p>
+          <h3>Your meeting is ready / Зустріч готова</h3>
+          <p class="muted">Share this link with a participant. It stops working after the host ends the call. / Надішліть посилання учаснику. Воно перестає працювати після завершення зустрічі.</p>
           <div class="link-row">
             <input id="meetingLink" readonly>
-            <button id="copyMeetingBtn" class="ghost">Copy</button>
+            <button id="copyMeetingBtn" class="ghost">Copy / Скопіювати</button>
           </div>
           <div class="actions-row">
-            <button id="openMeetingBtn" class="primary">Open meeting</button>
+            <button id="openMeetingBtn" class="primary">Open meeting / Відкрити зустріч</button>
           </div>
           <div id="meetingMessage" class="muted"></div>
         </div>
@@ -51,6 +51,18 @@
   </main>
 
   <script>
+    const TEXT = {
+      loginHeading: 'Logged in as / Ви ввійшли як',
+      creating: 'Creating… / Створення…',
+      create: 'Create one-time meeting / Створити одноразову зустріч',
+      authError: 'Failed to authenticate. / Не вдалося авторизуватися.',
+      sessionExpired: 'Session expired. Please log in again. / Сеанс завершено. Увійдіть ще раз.',
+      linkReady: 'Send this one-time link to your participant. / Надішліть це одноразове посилання учаснику.',
+      linkCopied: 'Link copied to clipboard! / Посилання скопійовано!',
+      linkCopyError: 'Unable to copy automatically. Copy it manually. / Не вдалося скопіювати автоматично. Скопіюйте вручну.',
+      meetingError: 'Unable to create meeting. / Не вдалося створити зустріч.'
+    };
+
     const loginForm = document.getElementById('loginForm');
     const loginCard = document.getElementById('loginCard');
     const dashboardCard = document.getElementById('dashboardCard');
@@ -76,14 +88,16 @@
         loginCard.classList.remove('hidden');
         dashboardCard.classList.add('hidden');
         loginForm.reset();
-        username && (document.getElementById('username').value = username);
+        if (username) {
+          document.getElementById('username').value = username;
+        }
       }
     }
 
     function showDashboard() {
       const username = sessionStorage.getItem('username');
       if (!username) return;
-      welcomeHeading.textContent = `Logged in as ${username}`;
+      welcomeHeading.textContent = `${TEXT.loginHeading} ${username}`;
       loginCard.classList.add('hidden');
       dashboardCard.classList.remove('hidden');
       loginError.classList.add('hidden');
@@ -109,12 +123,12 @@
 
         const data = await response.json();
         if (!response.ok || !data.ok) {
-          throw new Error(data.message || 'Failed to authenticate.');
+          throw new Error(data.message || TEXT.authError);
         }
 
         setAuthState(data.username, data.token);
       } catch (error) {
-        loginError.textContent = error.message;
+        loginError.textContent = error.message || TEXT.authError;
         loginError.classList.remove('hidden');
       }
     }
@@ -122,14 +136,14 @@
     async function createMeeting() {
       const token = sessionStorage.getItem('authToken');
       if (!token) {
-        loginError.textContent = 'Session expired. Please log in again.';
+        loginError.textContent = TEXT.sessionExpired;
         loginError.classList.remove('hidden');
         setAuthState();
         return;
       }
 
       createMeetingBtn.disabled = true;
-      createMeetingBtn.textContent = 'Creating…';
+      createMeetingBtn.textContent = TEXT.creating;
       meetingMessage.textContent = '';
 
       try {
@@ -144,33 +158,36 @@
 
         const data = await response.json();
         if (!response.ok || !data.ok) {
-          throw new Error(data.message || 'Unable to create meeting.');
+          throw new Error(data.message || TEXT.meetingError);
         }
 
-        const link = data.meetingUrl;
-        meetingLinkInput.value = link;
+        meetingLinkInput.value = data.meetingUrl;
         meetingBlock.classList.remove('hidden');
-        meetingMessage.textContent = 'Send this one-time link to your participant.';
+        meetingMessage.textContent = TEXT.linkReady;
         openMeetingBtn.dataset.roomToken = data.token;
       } catch (error) {
-        meetingMessage.textContent = error.message;
+        meetingMessage.textContent = error.message || TEXT.meetingError;
         meetingBlock.classList.remove('hidden');
       } finally {
         createMeetingBtn.disabled = false;
-        createMeetingBtn.textContent = 'Create one-time meeting';
+        createMeetingBtn.textContent = TEXT.create;
       }
     }
 
     function copyMeetingLink() {
       const link = meetingLinkInput.value;
       if (!link) return;
-      navigator.clipboard.writeText(link)
-        .then(() => {
-          meetingMessage.textContent = 'Link copied to clipboard!';
-        })
-        .catch(() => {
-          meetingMessage.textContent = 'Unable to copy automatically. Copy it manually.';
-        });
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link)
+          .then(() => {
+            meetingMessage.textContent = TEXT.linkCopied;
+          })
+          .catch(() => {
+            meetingMessage.textContent = TEXT.linkCopyError;
+          });
+      } else {
+        meetingMessage.textContent = TEXT.linkCopyError;
+      }
     }
 
     function openMeeting() {
