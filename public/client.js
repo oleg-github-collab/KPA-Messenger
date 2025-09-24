@@ -1096,17 +1096,67 @@ function sanitizeText(value) {
 async function ensureLocalStream() {
   if (state.localStream) return state.localStream;
   try {
-    state.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    // Request high quality video and audio
+    state.localStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 }
+      },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    // Set up local video
     ui.localVideo.srcObject = state.localStream;
     ui.localContainer.classList.remove('idle');
-    ui.muteBtn.textContent = t('mute');
-    ui.videoBtn.textContent = t('stopVideo');
+
+    // Hide placeholder once video loads
+    const placeholder = ui.localContainer.querySelector('.video-placeholder');
+    if (placeholder) {
+      ui.localVideo.addEventListener('loadedmetadata', () => {
+        placeholder.style.display = 'none';
+        console.log('Local video loaded, hiding placeholder');
+      });
+
+      // Also hide on first frame
+      ui.localVideo.addEventListener('loadeddata', () => {
+        placeholder.style.display = 'none';
+      });
+    }
+
+    // Update button states
+    updateControlButtonStates();
     await detectCameraFlipSupport();
+
+    console.log('Local stream established successfully');
     return state.localStream;
   } catch (error) {
+    console.error('Failed to get local stream:', error);
     notifyVideo(t('mediaPermissionDenied'), true);
     throw error;
   }
+}
+
+// Helper function to update control button states
+function updateControlButtonStates() {
+  if (!state.localStream) return;
+
+  const audioEnabled = getAudioEnabled();
+  const videoEnabled = getVideoEnabled();
+
+  // Update audio button
+  ui.muteBtn.classList.toggle('muted', !audioEnabled);
+  ui.muteBtn.classList.toggle('active', audioEnabled);
+  ui.muteBtn.title = audioEnabled ? t('mute') : t('unmute');
+
+  // Update video button
+  ui.videoBtn.classList.toggle('off', !videoEnabled);
+  ui.videoBtn.classList.toggle('active', videoEnabled);
+  ui.videoBtn.title = videoEnabled ? t('stopVideo') : t('startVideo');
 }
 
 async function detectCameraFlipSupport() {
