@@ -1167,6 +1167,7 @@ async function switchCamera() {
   }
 }
 
+// Enhanced screen sharing with better error handling and state management
 async function toggleScreenShare() {
   if (!navigator.mediaDevices?.getDisplayMedia) {
     notifyVideo('Screen sharing not supported', true);
@@ -1174,54 +1175,253 @@ async function toggleScreenShare() {
   }
 
   try {
+    // Show loading state
+    ui.screenShareBtn.classList.add('loading');
+    ui.screenShareBtn.disabled = true;
+
     if (state.isScreenSharing) {
+      // Stop screen sharing
       if (state.screenStream) {
         state.screenStream.getTracks().forEach(track => track.stop());
         state.screenStream = null;
       }
 
+      // Return to camera
       await ensureLocalStream();
 
+      // Replace screen track with camera track for all peers
+      const promises = [];
       state.peers.forEach(({ pc }) => {
         const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
         if (sender && state.localStream) {
           const [videoTrack] = state.localStream.getVideoTracks();
           if (videoTrack) {
-            sender.replaceTrack(videoTrack);
+            promises.push(sender.replaceTrack(videoTrack));
           }
         }
       });
 
+      await Promise.all(promises);
+
+      // Update local video
       ui.localVideo.srcObject = state.localStream;
       state.isScreenSharing = false;
-      ui.screenShareBtn.textContent = 'Stop share';
+
+      // Update UI
+      ui.screenShareBtn.classList.remove('active');
+      ui.screenShareBtn.title = t('screenShare');
+
+      const localTile = document.querySelector('[data-peer="self"]');
+      if (localTile) {
+        localTile.classList.remove('screen-sharing');
+      }
+
+      notifyVideo('Screen sharing stopped', false);
+
     } else {
+      // Start screen sharing
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false
+        video: {
+          mediaSource: 'screen',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 }
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        }
       });
 
       state.screenStream = screenStream;
       const [screenTrack] = screenStream.getVideoTracks();
+      const [audioTrack] = screenStream.getAudioTracks();
 
+      // Replace video track for all peers
+      const promises = [];
       state.peers.forEach(({ pc }) => {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(screenTrack);
+        const videoSender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          promises.push(videoSender.replaceTrack(screenTrack));
+        }
+
+        // Add audio track if available and not already added
+        if (audioTrack) {
+          const audioSender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+          if (audioSender) {
+            promises.push(audioSender.replaceTrack(audioTrack));
+          } else {
+            pc.addTrack(audioTrack, screenStream);
+          }
         }
       });
 
+      await Promise.all(promises);
+
+      // Update local video
       ui.localVideo.srcObject = screenStream;
       state.isScreenSharing = true;
-      ui.screenShareBtn.textContent = 'Screen';
 
+      // Update UI
+      ui.screenShareBtn.classList.add('active');
+      ui.screenShareBtn.title = 'Stop sharing screen';
+
+      const localTile = document.querySelector('[data-peer="self"]');
+      if (localTile) {
+        localTile.classList.add('screen-sharing');
+      }
+
+      // Handle screen share ending
       screenTrack.addEventListener('ended', () => {
+        console.log('Screen share track ended');
         toggleScreenShare();
       });
+
+      // Notify via data channels
+      state.peers.forEach((peer) => {
+        if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+          peer.dataChannel.send(JSON.stringify({
+            type: 'screenShareStatus',
+            enabled: true,
+            timestamp: Date.now()
+          }));
+        }
+      });
+
+      notifyVideo('Screen sharing started', false);
+    }
+
+  } catch (error) {
+    console.error('Screen sharing error:', error);
+
+    if (error.name === 'NotAllowedError') {
+      notifyVideo('Screen sharing permission denied', true);
+    } else if (error.name === 'NotSupportedError') {
+      notifyVideo('Screen sharing not supported', true);
+    } else {
+      notifyVideo('Failed to start screen sharing', true);
+    }
+  } finally {
+    // Remove loading state
+    ui.screenShareBtn.classList.remove('loading');
+    ui.screenShareBtn.disabled = false;
+  }
+}
+
+// Enhanced fullscreen toggle
+async function toggleFullscreen() {
+  try {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+      state.isFullscreen = true;
+      ui.fullscreenBtn.classList.add('active');
+      ui.fullscreenBtn.title = t('exitFullscreen');
+      notifyVideo(t('enterFullscreen'), false);
+    } else {
+      await document.exitFullscreen();
+      state.isFullscreen = false;
+      ui.fullscreenBtn.classList.remove('active');
+      ui.fullscreenBtn.title = t('enterFullscreen');
+      notifyVideo(t('exitFullscreen'), false);
     }
   } catch (error) {
-    notifyVideo('Failed to start screen sharing', true);
+    console.error('Fullscreen error:', error);
+    notifyVideo('Fullscreen not supported', true);
   }
+}
+
+// Enhanced Picture-in-Picture toggle
+async function togglePictureInPicture() {
+  try {
+    const videoEl = getPrimaryVideoElement() || ui.localVideo;
+
+    if (!videoEl || !document.pictureInPictureEnabled) {
+      notifyVideo(t('pipUnsupported'), true);
+      return;
+    }
+
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      state.isPictureInPicture = false;
+      ui.pipBtn.classList.remove('active');
+      ui.pipBtn.title = t('pip');
+      notifyVideo(t('pipExiting'), false);
+    } else {
+      await videoEl.requestPictureInPicture();
+      state.isPictureInPicture = true;
+      ui.pipBtn.classList.add('active');
+      ui.pipBtn.title = t('pipActive');
+      notifyVideo(t('pipEntering'), false);
+    }
+  } catch (error) {
+    console.error('PiP error:', error);
+    notifyVideo(t('pipUnsupported'), true);
+  }
+}
+
+// Enhanced meeting leave with confirmation
+async function leaveMeeting() {
+  if (state.isHost) {
+    const confirmEnd = confirm('As the host, leaving will end the meeting for all participants. Continue?');
+    if (!confirmEnd) return;
+  }
+
+  try {
+    // Show leaving state
+    ui.leaveBtn.classList.add('loading');
+    ui.leaveBtn.disabled = true;
+
+    // Stop all tracks
+    if (state.localStream) {
+      state.localStream.getTracks().forEach(track => track.stop());
+    }
+    if (state.screenStream) {
+      state.screenStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Clean up all peer connections
+    state.peers.forEach((_, peerId) => {
+      cleanupPeer(peerId);
+    });
+
+    // Disconnect from socket
+    socket.disconnect();
+
+    // Show leaving message
+    notifyVideo('Leaving meeting...', false);
+
+    // Redirect after delay
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 2000);
+
+  } catch (error) {
+    console.error('Error leaving meeting:', error);
+    // Force redirect on error
+    window.location.href = '/';
+  }
+}
+
+// Enhanced layout toggle with animation
+function toggleLayout() {
+  const layouts = ['layout-auto', 'layout-1x1', 'layout-1x2', 'layout-2x2', 'layout-2x3'];
+  const currentLayoutIndex = layouts.findIndex(layout => ui.videoGrid.classList.contains(layout));
+  const nextLayoutIndex = (currentLayoutIndex + 1) % layouts.length;
+
+  // Remove all layout classes
+  layouts.forEach(layout => ui.videoGrid.classList.remove(layout));
+
+  // Add new layout class
+  ui.videoGrid.classList.add(layouts[nextLayoutIndex]);
+
+  // Update button state
+  ui.layoutToggleBtn.title = `Layout: ${layouts[nextLayoutIndex].replace('layout-', '')}`;
+
+  // Store current layout
+  state.videoLayout = layouts[nextLayoutIndex];
+
+  notifyVideo(`Layout: ${layouts[nextLayoutIndex].replace('layout-', '').toUpperCase()}`, false);
 }
 
 function setupControlsAutoHide() {
@@ -1268,26 +1468,171 @@ function getVideoEnabled() {
   return !!(state.localStream && state.localStream.getVideoTracks().some((track) => track.enabled));
 }
 
+// Enhanced audio toggle with proper state management and UI feedback
 function toggleAudio(forceValue, { forced = false, silent = false } = {}) {
-  if (!state.localStream) return;
-  const enable = typeof forceValue === 'boolean' ? forceValue : !getAudioEnabled();
+  if (!state.localStream) {
+    console.warn('No local stream available for audio toggle');
+    return;
+  }
+
+  const currentlyEnabled = getAudioEnabled();
+  const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
+
+  // Update audio tracks
   state.localStream.getAudioTracks().forEach((track) => {
     track.enabled = enable;
   });
-  ui.muteBtn.textContent = enable ? t('mute') : t('unmute');
+
+  // Update button state and styling
+  ui.muteBtn.classList.toggle('muted', !enable);
+  ui.muteBtn.classList.toggle('active', enable);
   ui.muteBtn.classList.toggle('forced', forced && !enable);
-  if (forced && !silent) {
-    notifyVideo(enable ? t('unmute') : t('mute'));
+  ui.muteBtn.title = enable ? t('mute') : t('unmute');
+
+  // Update local video tile
+  const localTile = document.querySelector('[data-peer="self"]');
+  if (localTile) {
+    localTile.classList.toggle('audio-muted', !enable);
   }
+
+  // Store audio state
+  state.audioEnabled = enable;
+
+  // Notify other participants via data channels
+  state.peers.forEach((peer) => {
+    if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+      peer.dataChannel.send(JSON.stringify({
+        type: 'audioStatus',
+        enabled: enable,
+        timestamp: Date.now()
+      }));
+    }
+  });
+
+  // Show notification if needed
+  if (forced && !silent) {
+    notifyVideo(enable ? t('unmutedByHost') : t('mutedByHost'));
+  } else if (!silent) {
+    notifyVideo(enable ? t('unmute') : t('mute'), false);
+  }
+
+  console.log(`Audio ${enable ? 'enabled' : 'disabled'}`);
 }
 
+// Enhanced video toggle with proper state management and UI feedback
 function toggleVideo(forceValue, { silent = false } = {}) {
-  if (!state.localStream) return;
-  const enable = typeof forceValue === 'boolean' ? forceValue : !getVideoEnabled();
+  if (!state.localStream) {
+    console.warn('No local stream available for video toggle');
+    return;
+  }
+
+  const currentlyEnabled = getVideoEnabled();
+  const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
+
+  // Update video tracks
   state.localStream.getVideoTracks().forEach((track) => {
     track.enabled = enable;
   });
-  ui.videoBtn.textContent = enable ? t('stopVideo') : t('startVideo');
+
+  // Update button state and styling
+  ui.videoBtn.classList.toggle('off', !enable);
+  ui.videoBtn.classList.toggle('active', enable);
+  ui.videoBtn.title = enable ? t('stopVideo') : t('startVideo');
+
+  // Update local video tile
+  const localTile = document.querySelector('[data-peer="self"]');
+  if (localTile) {
+    localTile.classList.toggle('video-disabled', !enable);
+    const placeholder = localTile.querySelector('.video-placeholder');
+    if (placeholder) {
+      placeholder.style.display = enable ? 'none' : 'grid';
+      placeholder.textContent = enable ? '' : t('localPlaceholder');
+    }
+  }
+
+  // Store video state
+  state.videoEnabled = enable;
+
+  // Notify other participants via data channels
+  state.peers.forEach((peer) => {
+    if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+      peer.dataChannel.send(JSON.stringify({
+        type: 'videoStatus',
+        enabled: enable,
+        timestamp: Date.now()
+      }));
+    }
+  });
+
+  // Show notification if needed
+  if (!silent) {
+    notifyVideo(enable ? t('startVideo') : t('stopVideo'), false);
+  }
+
+  console.log(`Video ${enable ? 'enabled' : 'disabled'}`);
+}
+
+// Enhanced camera switching with error handling
+async function switchCamera() {
+  if (!state.localStream || !state.supportsCameraFlip) {
+    console.warn('Camera flip not supported or no stream available');
+    return;
+  }
+
+  try {
+    // Show loading state
+    ui.cameraFlipBtn.classList.add('loading');
+    ui.cameraFlipBtn.disabled = true;
+
+    const videoTrack = state.localStream.getVideoTracks()[0];
+    if (!videoTrack) {
+      throw new Error('No video track found');
+    }
+
+    // Stop current video track
+    videoTrack.stop();
+
+    // Switch camera facing mode
+    state.currentFacingMode = state.currentFacingMode === 'user' ? 'environment' : 'user';
+
+    // Get new stream with switched camera
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: state.currentFacingMode,
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false // Don't get audio track again
+    });
+
+    const newVideoTrack = newStream.getVideoTracks()[0];
+
+    // Replace video track in local stream
+    state.localStream.removeTrack(videoTrack);
+    state.localStream.addTrack(newVideoTrack);
+
+    // Update local video element
+    ui.localVideo.srcObject = state.localStream;
+
+    // Replace video track in all peer connections
+    for (const [peerId, peer] of state.peers) {
+      const sender = peer.pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) {
+        await sender.replaceTrack(newVideoTrack);
+        console.log(`Replaced video track for peer: ${peerId}`);
+      }
+    }
+
+    notifyVideo(`Switched to ${state.currentFacingMode === 'user' ? 'front' : 'back'} camera`, false);
+
+  } catch (error) {
+    console.error('Error switching camera:', error);
+    notifyVideo('Failed to switch camera', true);
+  } finally {
+    // Remove loading state
+    ui.cameraFlipBtn.classList.remove('loading');
+    ui.cameraFlipBtn.disabled = false;
+  }
 }
 
 function createRemoteTile(peerId, name) {
@@ -1395,59 +1740,462 @@ function updateVideoLayout(participantCount) {
   state.videoLayout = layout;
 }
 
-async function createPeerConnection(peerId, name, initiator) {
+// Enhanced WebRTC Configuration with STUN and TURN servers
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+  ],
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all',
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
+};
+
+// Connection state tracking
+const connectionStats = {
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 5,
+  reconnectDelay: 1000,
+  connectionStartTime: null,
+  sessionDuration: 0,
+  lastHeartbeat: Date.now(),
+};
+
+// Enhanced peer connection with auto-reconnect
+async function createPeerConnection(peerId, name, initiator, isReconnect = false) {
   await ensureLocalStream().catch(() => {});
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-  });
+
+  const pc = new RTCPeerConnection(rtcConfig);
   const tile = createRemoteTile(peerId, name);
   const videoEl = tile.querySelector('video');
-  state.peers.set(peerId, { pc, videoEl, name, stream: null });
 
-  if (state.localStream) {
-    state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
-  }
-
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit('webrtc-candidate', { targetId: peerId, candidate: event.candidate });
+  const peerData = {
+    pc,
+    videoEl,
+    name,
+    stream: null,
+    connectionState: 'new',
+    reconnectCount: 0,
+    lastReconnect: Date.now(),
+    dataChannel: null,
+    stats: {
+      bytesReceived: 0,
+      bytesSent: 0,
+      packetsLost: 0,
+      audioLevel: 0,
     }
   };
 
+  state.peers.set(peerId, peerData);
+
+  // Add local tracks with enhanced error handling
+  if (state.localStream) {
+    const tracks = state.localStream.getTracks();
+    for (const track of tracks) {
+      try {
+        pc.addTrack(track, state.localStream);
+      } catch (error) {
+        console.error(`Error adding ${track.kind} track:`, error);
+      }
+    }
+  }
+
+  // Create data channel for heartbeat and connection monitoring
+  if (initiator) {
+    try {
+      peerData.dataChannel = pc.createDataChannel('status', {
+        ordered: true,
+        maxRetransmits: 3,
+      });
+      setupDataChannel(peerData.dataChannel, peerId);
+    } catch (error) {
+      console.error('Error creating data channel:', error);
+    }
+  }
+
+  // Enhanced ICE candidate handling
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.emit('webrtc-candidate', {
+        targetId: peerId,
+        candidate: event.candidate,
+        timestamp: Date.now()
+      });
+    } else {
+      // ICE gathering complete
+      peerData.iceGatheringComplete = true;
+    }
+  };
+
+  // Enhanced track handling
   pc.ontrack = (event) => {
     const [stream] = event.streams;
     if (stream) {
       const entry = state.peers.get(peerId);
-      entry.stream = stream;
-      entry.videoEl.srcObject = stream;
-      tile.classList.remove('idle');
-      if (!state.primaryPeerId) {
-        setPrimaryPeer(peerId, false);
+      if (entry) {
+        entry.stream = stream;
+        entry.videoEl.srcObject = stream;
+        entry.connectionState = 'connected';
+        tile.classList.remove('idle');
+        tile.classList.add('connected');
+
+        // Monitor stream health
+        monitorStreamHealth(stream, peerId);
+
+        if (!state.primaryPeerId) {
+          setPrimaryPeer(peerId, false);
+        }
+
+        // Start connection quality monitoring
+        startConnectionMonitoring(peerId);
       }
     }
   };
 
-  pc.onconnectionstatechange = () => {
-    if (['failed', 'disconnected'].includes(pc.connectionState)) {
-      notifyVideo(t('reconnection'), true);
+  // Data channel handler
+  pc.ondatachannel = (event) => {
+    setupDataChannel(event.channel, peerId);
+  };
+
+  // Enhanced connection state management
+  pc.onconnectionstatechange = async () => {
+    const entry = state.peers.get(peerId);
+    if (!entry) return;
+
+    entry.connectionState = pc.connectionState;
+    updatePeerUI(peerId, pc.connectionState);
+
+    switch (pc.connectionState) {
+      case 'connecting':
+        tile.classList.add('connecting');
+        break;
+      case 'connected':
+        tile.classList.remove('connecting', 'reconnecting');
+        tile.classList.add('connected');
+        entry.reconnectCount = 0;
+        connectionStats.reconnectAttempts = 0;
+        break;
+      case 'disconnected':
+        tile.classList.add('reconnecting');
+        await handlePeerDisconnection(peerId, false);
+        break;
+      case 'failed':
+        tile.classList.add('failed');
+        await handlePeerDisconnection(peerId, true);
+        break;
     }
   };
 
+  // ICE connection state handling
+  pc.oniceconnectionstatechange = () => {
+    const entry = state.peers.get(peerId);
+    if (!entry) return;
+
+    console.log(`ICE connection state for ${peerId}: ${pc.iceConnectionState}`);
+
+    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+      handlePeerDisconnection(peerId, pc.iceConnectionState === 'failed');
+    }
+  };
+
+  // Create offer/answer with enhanced error handling
   if (initiator) {
     try {
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        iceRestart: isReconnect
+      });
       await pc.setLocalDescription(offer);
+
       socket.emit('webrtc-offer', {
         targetId: peerId,
         offer: pc.localDescription,
         name: state.displayName,
+        isReconnect,
+        timestamp: Date.now()
       });
     } catch (error) {
-      console.error('create offer failed', error);
+      console.error('Create offer failed:', error);
+      notifyVideo('Connection setup failed', true);
     }
   }
 
   return pc;
+}
+
+// Data channel setup for heartbeat and status
+function setupDataChannel(dataChannel, peerId) {
+  const entry = state.peers.get(peerId);
+  if (!entry) return;
+
+  entry.dataChannel = dataChannel;
+
+  dataChannel.onopen = () => {
+    console.log(`Data channel opened for ${peerId}`);
+    startHeartbeat(peerId);
+  };
+
+  dataChannel.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleDataChannelMessage(peerId, data);
+    } catch (error) {
+      console.error('Error parsing data channel message:', error);
+    }
+  };
+
+  dataChannel.onerror = (error) => {
+    console.error(`Data channel error for ${peerId}:`, error);
+  };
+
+  dataChannel.onclose = () => {
+    console.log(`Data channel closed for ${peerId}`);
+    stopHeartbeat(peerId);
+  };
+}
+
+// Heartbeat mechanism for connection health
+function startHeartbeat(peerId) {
+  const entry = state.peers.get(peerId);
+  if (!entry || !entry.dataChannel) return;
+
+  entry.heartbeatInterval = setInterval(() => {
+    if (entry.dataChannel && entry.dataChannel.readyState === 'open') {
+      entry.dataChannel.send(JSON.stringify({
+        type: 'heartbeat',
+        timestamp: Date.now(),
+        sessionDuration: Date.now() - (connectionStats.connectionStartTime || Date.now())
+      }));
+    }
+  }, 5000); // Send heartbeat every 5 seconds
+}
+
+function stopHeartbeat(peerId) {
+  const entry = state.peers.get(peerId);
+  if (entry && entry.heartbeatInterval) {
+    clearInterval(entry.heartbeatInterval);
+    entry.heartbeatInterval = null;
+  }
+}
+
+// Handle data channel messages
+function handleDataChannelMessage(peerId, data) {
+  const entry = state.peers.get(peerId);
+  if (!entry) return;
+
+  switch (data.type) {
+    case 'heartbeat':
+      entry.lastHeartbeat = Date.now();
+      connectionStats.lastHeartbeat = Date.now();
+      break;
+    case 'connectionQuality':
+      updateConnectionQualityUI(peerId, data.quality);
+      break;
+    case 'audioLevel':
+      updateAudioLevelUI(peerId, data.level);
+      break;
+  }
+}
+
+// Enhanced peer disconnection handling with auto-reconnect
+async function handlePeerDisconnection(peerId, isFailed = false) {
+  const entry = state.peers.get(peerId);
+  if (!entry) return;
+
+  // Don't attempt reconnect if we're already trying or if max attempts reached
+  if (entry.reconnectCount >= connectionStats.maxReconnectAttempts) {
+    console.log(`Max reconnection attempts reached for ${peerId}`);
+    notifyVideo(`Connection to ${entry.name || 'peer'} lost`, true);
+    return;
+  }
+
+  entry.reconnectCount++;
+  const delay = connectionStats.reconnectDelay * Math.pow(2, entry.reconnectCount - 1); // Exponential backoff
+
+  console.log(`Attempting to reconnect to ${peerId} (attempt ${entry.reconnectCount})`);
+  notifyVideo(`Reconnecting to ${entry.name || 'peer'}... (${entry.reconnectCount}/${connectionStats.maxReconnectAttempts})`, false);
+
+  // Wait before reconnect attempt
+  setTimeout(async () => {
+    try {
+      // Close existing connection
+      entry.pc.close();
+
+      // Create new peer connection
+      await createPeerConnection(peerId, entry.name, true, true);
+
+    } catch (error) {
+      console.error(`Reconnection attempt ${entry.reconnectCount} failed:`, error);
+
+      // Try again if we haven't reached max attempts
+      if (entry.reconnectCount < connectionStats.maxReconnectAttempts) {
+        handlePeerDisconnection(peerId, isFailed);
+      } else {
+        notifyVideo(`Unable to reconnect to ${entry.name || 'peer'}`, true);
+      }
+    }
+  }, delay);
+}
+
+// Monitor stream health
+function monitorStreamHealth(stream, peerId) {
+  const tracks = stream.getTracks();
+
+  tracks.forEach(track => {
+    track.addEventListener('ended', () => {
+      console.log(`${track.kind} track ended for ${peerId}`);
+      handleTrackEnded(peerId, track.kind);
+    });
+
+    track.addEventListener('mute', () => {
+      console.log(`${track.kind} track muted for ${peerId}`);
+      updateTrackStatusUI(peerId, track.kind, 'muted');
+    });
+
+    track.addEventListener('unmute', () => {
+      console.log(`${track.kind} track unmuted for ${peerId}`);
+      updateTrackStatusUI(peerId, track.kind, 'unmuted');
+    });
+  });
+}
+
+// Connection quality monitoring
+function startConnectionMonitoring(peerId) {
+  const entry = state.peers.get(peerId);
+  if (!entry || entry.statsInterval) return;
+
+  entry.statsInterval = setInterval(async () => {
+    try {
+      const stats = await entry.pc.getStats();
+      analyzeConnectionStats(peerId, stats);
+    } catch (error) {
+      console.error(`Error getting stats for ${peerId}:`, error);
+    }
+  }, 10000); // Check every 10 seconds
+}
+
+function stopConnectionMonitoring(peerId) {
+  const entry = state.peers.get(peerId);
+  if (entry && entry.statsInterval) {
+    clearInterval(entry.statsInterval);
+    entry.statsInterval = null;
+  }
+}
+
+// Analyze WebRTC stats for connection quality
+function analyzeConnectionStats(peerId, stats) {
+  const entry = state.peers.get(peerId);
+  if (!entry) return;
+
+  let packetsLost = 0;
+  let packetsReceived = 0;
+  let bytesReceived = 0;
+  let audioLevel = 0;
+
+  stats.forEach(report => {
+    if (report.type === 'inbound-rtp') {
+      packetsLost += report.packetsLost || 0;
+      packetsReceived += report.packetsReceived || 0;
+      bytesReceived += report.bytesReceived || 0;
+    }
+
+    if (report.type === 'media-source' && report.kind === 'audio') {
+      audioLevel = report.audioLevel || 0;
+    }
+  });
+
+  // Calculate connection quality
+  const lossRate = packetsReceived > 0 ? packetsLost / (packetsLost + packetsReceived) : 0;
+  let quality = 'excellent';
+
+  if (lossRate > 0.05) {
+    quality = 'poor';
+  } else if (lossRate > 0.02) {
+    quality = 'good';
+  }
+
+  // Update peer stats
+  entry.stats = { bytesReceived, packetsLost, audioLevel };
+
+  // Send quality info via data channel
+  if (entry.dataChannel && entry.dataChannel.readyState === 'open') {
+    entry.dataChannel.send(JSON.stringify({
+      type: 'connectionQuality',
+      quality,
+      lossRate,
+      timestamp: Date.now()
+    }));
+  }
+
+  updateConnectionQualityUI(peerId, quality);
+}
+
+// UI Updates
+function updatePeerUI(peerId, connectionState) {
+  const tile = document.querySelector(`[data-peer="${peerId}"]`);
+  if (!tile) return;
+
+  // Remove all connection state classes
+  tile.classList.remove('connecting', 'connected', 'reconnecting', 'failed');
+
+  // Add current state class
+  if (connectionState) {
+    tile.classList.add(connectionState);
+  }
+}
+
+function updateConnectionQualityUI(peerId, quality) {
+  const tile = document.querySelector(`[data-peer="${peerId}"]`);
+  if (!tile) return;
+
+  // Remove previous quality classes
+  tile.classList.remove('connection-excellent', 'connection-good', 'connection-poor');
+
+  // Add current quality class
+  tile.classList.add(`connection-${quality}`);
+
+  // Update quality indicator if it exists
+  let indicator = tile.querySelector('.connection-quality');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.className = `connection-quality connection-${quality}`;
+    tile.appendChild(indicator);
+  } else {
+    indicator.className = `connection-quality connection-${quality}`;
+  }
+}
+
+function updateTrackStatusUI(peerId, trackKind, status) {
+  const tile = document.querySelector(`[data-peer="${peerId}"]`);
+  if (!tile) return;
+
+  tile.classList.toggle(`${trackKind}-${status}`, status === 'muted');
+}
+
+function updateAudioLevelUI(peerId, level) {
+  const tile = document.querySelector(`[data-peer="${peerId}"]`);
+  if (!tile) return;
+
+  // Add speaking indicator based on audio level
+  tile.classList.toggle('speaking', level > 0.01);
+}
+
+function handleTrackEnded(peerId, trackKind) {
+  const entry = state.peers.get(peerId);
+  if (!entry) return;
+
+  console.log(`${trackKind} track ended for ${peerId}`);
+  notifyVideo(`${entry.name || 'Peer'} ${trackKind} disconnected`, false);
+
+  // Attempt to renegotiate if needed
+  if (entry.pc.connectionState === 'connected') {
+    // The peer may have just disabled their camera/microphone
+    updateTrackStatusUI(peerId, trackKind, 'disabled');
+  }
 }
 
 function setPrimaryPeer(peerId, announce = true) {
@@ -1469,13 +2217,91 @@ function getPrimaryVideoElement() {
   return first ? first.videoEl : null;
 }
 
+// Enhanced peer cleanup with proper resource management
 function cleanupPeer(peerId) {
   const entry = state.peers.get(peerId);
   if (!entry) return;
-  entry.pc.close();
-  if (entry.videoEl) entry.videoEl.srcObject = null;
+
+  // Stop heartbeat
+  stopHeartbeat(peerId);
+
+  // Stop connection monitoring
+  stopConnectionMonitoring(peerId);
+
+  // Close data channel
+  if (entry.dataChannel) {
+    entry.dataChannel.close();
+  }
+
+  // Close peer connection
+  if (entry.pc) {
+    entry.pc.close();
+  }
+
+  // Clean up video element
+  if (entry.videoEl) {
+    entry.videoEl.srcObject = null;
+  }
+
+  // Remove from peers map
   state.peers.delete(peerId);
+
+  // Remove UI tile
   removeRemoteTile(peerId);
+
+  console.log(`Cleaned up peer: ${peerId}`);
+}
+
+// Session duration tracking and management
+function initializeSessionTracking() {
+  connectionStats.connectionStartTime = Date.now();
+
+  // Update session duration every minute
+  setInterval(() => {
+    connectionStats.sessionDuration = Date.now() - connectionStats.connectionStartTime;
+    updateSessionUI();
+
+    // Check session limits (6 hours max)
+    const maxSessionDuration = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
+    if (connectionStats.sessionDuration > maxSessionDuration) {
+      handleSessionTimeout();
+    }
+  }, 60000); // Update every minute
+}
+
+function updateSessionUI() {
+  const duration = connectionStats.sessionDuration;
+  const hours = Math.floor(duration / (60 * 60 * 1000));
+  const minutes = Math.floor((duration % (60 * 60 * 1000)) / (60 * 1000));
+
+  const sessionDisplay = document.querySelector('.session-duration');
+  if (sessionDisplay) {
+    sessionDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  }
+
+  // Show warning at 5.5 hours
+  if (duration > 5.5 * 60 * 60 * 1000 && !state.sessionWarningShown) {
+    state.sessionWarningShown = true;
+    notifyVideo('Session will end in 30 minutes due to 6-hour limit', true);
+  }
+}
+
+function handleSessionTimeout() {
+  notifyVideo('Session ended due to 6-hour time limit', true);
+
+  // Gracefully close all connections
+  state.peers.forEach((_, peerId) => {
+    cleanupPeer(peerId);
+  });
+
+  // Redirect to home or show reconnect option
+  setTimeout(() => {
+    if (confirm(t('sessionExpired') + ' Would you like to start a new session?')) {
+      window.location.reload();
+    } else {
+      window.location.href = '/';
+    }
+  }, 3000);
 }
 
 function toggleLayout() {
@@ -1942,44 +2768,120 @@ function setupAssistantHandlers() {
   });
 }
 
+// Enhanced WebRTC handlers with better error handling and reconnect support
 function setupWebRTCHandlers() {
-  socket.on('webrtc-offer', async ({ from, name, offer }) => {
+  socket.on('webrtc-offer', async ({ from, name, offer, isReconnect, timestamp }) => {
     try {
+      console.log(`Received offer from ${from} (reconnect: ${isReconnect})`);
+
       let peer = state.peers.get(from);
-      if (!peer) {
-        await createPeerConnection(from, name, false);
+      if (!peer || isReconnect) {
+        // Clean up existing peer if this is a reconnect
+        if (peer && isReconnect) {
+          cleanupPeer(from);
+        }
+        await createPeerConnection(from, name, false, isReconnect);
         peer = state.peers.get(from);
       }
+
+      if (!peer || !peer.pc) {
+        throw new Error('Failed to create peer connection');
+      }
+
       await peer.pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peer.pc.createAnswer();
+
+      const answer = await peer.pc.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
+
       await peer.pc.setLocalDescription(answer);
+
       socket.emit('webrtc-answer', {
         targetId: from,
         answer: peer.pc.localDescription,
+        isReconnect,
+        timestamp: Date.now()
       });
+
+      console.log(`Sent answer to ${from}`);
+
     } catch (error) {
-      console.error('offer error', error);
+      console.error('Error handling WebRTC offer:', error);
+      notifyVideo(`Connection error with ${name || 'peer'}`, true);
     }
   });
 
-  socket.on('webrtc-answer', async ({ from, answer }) => {
+  socket.on('webrtc-answer', async ({ from, answer, isReconnect, timestamp }) => {
     const peer = state.peers.get(from);
-    if (!peer) return;
+    if (!peer || !peer.pc) {
+      console.error(`No peer connection found for ${from}`);
+      return;
+    }
+
     try {
+      console.log(`Received answer from ${from} (reconnect: ${isReconnect})`);
       await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log(`Set remote description for ${from}`);
+
     } catch (error) {
-      console.error('answer error', error);
+      console.error('Error handling WebRTC answer:', error);
+
+      // Try to recover from this error
+      if (peer.reconnectCount < connectionStats.maxReconnectAttempts) {
+        console.log(`Attempting to recover connection with ${from}`);
+        setTimeout(() => {
+          handlePeerDisconnection(from, true);
+        }, 1000);
+      }
     }
   });
 
-  socket.on('webrtc-candidate', async ({ from, candidate }) => {
+  socket.on('webrtc-candidate', async ({ from, candidate, timestamp }) => {
     const peer = state.peers.get(from);
-    if (!peer) return;
+    if (!peer || !peer.pc) {
+      console.error(`No peer connection found for candidate from ${from}`);
+      return;
+    }
+
     try {
       await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      console.log(`Added ICE candidate from ${from}`);
+
     } catch (error) {
-      console.error('candidate error', error);
+      // Don't log all ICE candidate errors as they're common during negotiation
+      if (error.name !== 'InvalidStateError' && error.name !== 'InvalidAccessError') {
+        console.error('Error adding ICE candidate:', error);
+      }
     }
+  });
+
+  // Enhanced socket connection monitoring
+  socket.on('connect', () => {
+    console.log('Socket connected');
+    connectionStats.lastHeartbeat = Date.now();
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Socket disconnected:', reason);
+    notifyVideo('Connection to server lost, attempting to reconnect...', true);
+  });
+
+  socket.on('reconnect', (attemptNumber) => {
+    console.log('Socket reconnected after', attemptNumber, 'attempts');
+    notifyVideo('Reconnected to server', false);
+
+    // Refresh the meeting state after reconnection
+    setTimeout(() => {
+      if (state.displayName && state.meetingToken) {
+        joinMeeting(state.displayName);
+      }
+    }, 1000);
+  });
+
+  socket.on('reconnect_error', (error) => {
+    console.error('Socket reconnection failed:', error);
+    notifyVideo('Failed to reconnect to server', true);
   });
 }
 
@@ -1988,6 +2890,11 @@ async function bootstrap() {
     notifyChat(t('invalidLink'), true);
     return;
   }
+
+  // Initialize session tracking
+  initializeSessionTracking();
+
+  // Setup UI and event handlers
   document.documentElement.lang = currentLang;
   refreshStaticText();
   setupEventListeners();
@@ -1997,6 +2904,9 @@ async function bootstrap() {
   setupControlsAutoHide();
   detectCameraFlipSupport();
 
+  // Add session duration display to UI
+  addSessionDurationDisplay();
+
   try {
     await prefetchMeeting();
     if (state.authToken && sessionStorage.getItem('username')) {
@@ -2005,7 +2915,25 @@ async function bootstrap() {
       showNameModal();
     }
   } catch (error) {
-    console.error(error);
+    console.error('Bootstrap error:', error);
+    notifyChat(error.message || 'Failed to initialize meeting', true);
+  }
+}
+
+// Add session duration display to the UI
+function addSessionDurationDisplay() {
+  const header = document.querySelector('.chat-header .header-info');
+  if (header && !header.querySelector('.session-duration')) {
+    const durationDisplay = document.createElement('div');
+    durationDisplay.className = 'session-duration';
+    durationDisplay.style.cssText = `
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+      margin-top: 2px;
+    `;
+    durationDisplay.textContent = '00:00';
+    header.appendChild(durationDisplay);
   }
 }
 
