@@ -1520,18 +1520,30 @@ function getVideoEnabled() {
 
 // Enhanced audio toggle with proper state management and UI feedback
 function toggleAudio(forceValue, { forced = false, silent = false } = {}) {
-  if (!state.localStream) {
-    console.warn('No local stream available for audio toggle');
+  try {
+    if (!state.localStream) {
+      console.warn('No local stream available for audio toggle');
+      handleButtonError('muteBtn', 'No audio stream available');
+      return;
+    }
+
+    const currentlyEnabled = getAudioEnabled();
+    const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
+
+    // Update audio tracks with error handling
+    const audioTracks = state.localStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      handleButtonError('muteBtn', 'No audio tracks found');
+      return;
+    }
+
+    audioTracks.forEach((track) => {
+      track.enabled = enable;
+    });
+  } catch (error) {
+    handleButtonError('muteBtn', error);
     return;
   }
-
-  const currentlyEnabled = getAudioEnabled();
-  const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
-
-  // Update audio tracks
-  state.localStream.getAudioTracks().forEach((track) => {
-    track.enabled = enable;
-  });
 
   // Update button state and styling
   ui.muteBtn.classList.toggle('muted', !enable);
@@ -1571,18 +1583,30 @@ function toggleAudio(forceValue, { forced = false, silent = false } = {}) {
 
 // Enhanced video toggle with proper state management and UI feedback
 function toggleVideo(forceValue, { silent = false } = {}) {
-  if (!state.localStream) {
-    console.warn('No local stream available for video toggle');
+  try {
+    if (!state.localStream) {
+      console.warn('No local stream available for video toggle');
+      handleButtonError('videoBtn', 'No video stream available');
+      return;
+    }
+
+    const currentlyEnabled = getVideoEnabled();
+    const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
+
+    // Update video tracks with error handling
+    const videoTracks = state.localStream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      handleButtonError('videoBtn', 'No video tracks found');
+      return;
+    }
+
+    videoTracks.forEach((track) => {
+      track.enabled = enable;
+    });
+  } catch (error) {
+    handleButtonError('videoBtn', error);
     return;
   }
-
-  const currentlyEnabled = getVideoEnabled();
-  const enable = typeof forceValue === 'boolean' ? forceValue : !currentlyEnabled;
-
-  // Update video tracks
-  state.localStream.getVideoTracks().forEach((track) => {
-    track.enabled = enable;
-  });
 
   // Update button state and styling
   ui.videoBtn.classList.toggle('off', !enable);
@@ -1758,6 +1782,19 @@ function refreshVideoPagination() {
   });
 }
 
+function changePage(direction) {
+  const order = state.peerOrder.length ? state.peerOrder : ['self'];
+  if (!order.includes('self')) order.unshift('self');
+  const total = order.length;
+  const totalPages = Math.max(1, Math.ceil(total / state.videosPerPage));
+
+  const newPage = state.videoPage + direction;
+  if (newPage >= 0 && newPage < totalPages) {
+    state.videoPage = newPage;
+    refreshVideoPagination();
+  }
+}
+
 function updateVideoLayout(participantCount) {
   const grid = ui.videoGrid;
   grid.className = grid.className.replace(/layout-\w+/g, '');
@@ -1910,7 +1947,7 @@ async function createPeerConnection(peerId, name, initiator, isReconnect = false
     setupDataChannel(event.channel, peerId);
   };
 
-  // Enhanced connection state management
+  // Ultra-stable connection state management with instant reconnection
   pc.onconnectionstatechange = async () => {
     const entry = state.peers.get(peerId);
     if (!entry) return;
@@ -1921,20 +1958,30 @@ async function createPeerConnection(peerId, name, initiator, isReconnect = false
     switch (pc.connectionState) {
       case 'connecting':
         tile.classList.add('connecting');
+        // Show subtle connecting indicator
+        showConnectionStatus(`Connecting to ${peerId}...`);
         break;
       case 'connected':
-        tile.classList.remove('connecting', 'reconnecting');
+        tile.classList.remove('connecting', 'reconnecting', 'failed');
         tile.classList.add('connected');
         entry.reconnectCount = 0;
         connectionStats.reconnectAttempts = 0;
+        hideConnectionStatus();
+        // Preemptively test connection health
+        if (entry.healthCheckInterval) clearInterval(entry.healthCheckInterval);
+        entry.healthCheckInterval = setInterval(() => testConnectionHealth(peerId), 10000);
         break;
       case 'disconnected':
         tile.classList.add('reconnecting');
-        await handlePeerDisconnection(peerId, false);
+        showConnectionStatus(`Reconnecting to ${peerId}...`, 'warning');
+        // Start immediate reconnection attempt
+        setTimeout(() => handlePeerDisconnection(peerId, false), 500);
         break;
       case 'failed':
         tile.classList.add('failed');
-        await handlePeerDisconnection(peerId, true);
+        showConnectionStatus(`Connection to ${peerId} failed`, 'error');
+        // Attempt recovery after short delay
+        setTimeout(() => handlePeerDisconnection(peerId, true), 1000);
         break;
     }
   };
@@ -3322,11 +3369,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const emojiPaletteClose = document.getElementById('emojiPaletteClose');
   const testOverlayClose = document.getElementById('testOverlayClose');
   const participantsDrawerClose = document.getElementById('participantsDrawerClose');
+  const emotionOverlayClose = document.getElementById('emotionOverlayClose');
 
   if (emotionPaletteClose) emotionPaletteClose.addEventListener('click', () => closeModal('emotionPalette'));
   if (emojiPaletteClose) emojiPaletteClose.addEventListener('click', () => closeModal('emojiPalette'));
   if (testOverlayClose) testOverlayClose.addEventListener('click', () => closeModal('testOverlay'));
   if (participantsDrawerClose) participantsDrawerClose.addEventListener('click', () => closeModal('participantsDrawer'));
+  if (emotionOverlayClose) emotionOverlayClose.addEventListener('click', () => closeModal('emotionOverlay'));
 
   // Enhanced button functionality
   const emotionPanelBtn = document.getElementById('emotionPanelBtn');
@@ -3341,8 +3390,42 @@ document.addEventListener('DOMContentLoaded', () => {
   if (openParticipantsBtn) openParticipantsBtn.addEventListener('click', () => openModal('participantsDrawer'));
   if (profileDrawerBtn) profileDrawerBtn.addEventListener('click', () => openModal('participantsDrawer'));
 
+  // Panel tab switching
+  const panelTabs = document.querySelectorAll('.panel-tab');
+  panelTabs.forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      const targetPaneId = e.target.dataset.target;
+      if (targetPaneId) {
+        // Remove active class from all tabs and panes
+        panelTabs.forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel-pane').forEach(pane => pane.classList.remove('active'));
+
+        // Add active class to clicked tab and corresponding pane
+        e.target.classList.add('active');
+        const targetPane = document.getElementById(targetPaneId);
+        if (targetPane) targetPane.classList.add('active');
+      }
+    });
+  });
+
+  // Inline emoji button
+  const emojiBtnInline = document.getElementById('emojiBtnInline');
+  if (emojiBtnInline) emojiBtnInline.addEventListener('click', showEmojiPalette);
+
+  // Video pagination buttons
+  const videoPrevPage = document.getElementById('videoPrevPage');
+  const videoNextPage = document.getElementById('videoNextPage');
+  if (videoPrevPage) videoPrevPage.addEventListener('click', () => changePage(-1));
+  if (videoNextPage) videoNextPage.addEventListener('click', () => changePage(1));
+
   // Initialize drag and drop
   setTimeout(initDragAndDrop, 1000);
+
+  // Enhanced chat input functionality
+  initEnhancedChatInput();
+
+  // Initialize mobile features
+  initMobileFeatures();
 
   // Start timer when joining meeting
   setTimeout(() => {
@@ -3351,5 +3434,285 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 2000);
 });
+
+// ===== ULTRA-STABLE CONNECTION FUNCTIONS =====
+
+// Test connection health
+function testConnectionHealth(peerId) {
+  const entry = state.peers.get(peerId);
+  if (!entry || !entry.pc) return;
+
+  const pc = entry.pc;
+  if (pc.connectionState === 'connected') {
+    // Test if data channel is still working
+    if (entry.dataChannel && entry.dataChannel.readyState === 'open') {
+      try {
+        entry.dataChannel.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+      } catch (err) {
+        console.warn(`Health check failed for ${peerId}:`, err);
+        handlePeerDisconnection(peerId, false);
+      }
+    }
+  }
+}
+
+// Show connection status with better UX
+let statusTimeout;
+function showConnectionStatus(message, type = 'info') {
+  const statusEl = document.getElementById('videoNotice') || document.getElementById('chatNotice');
+  if (!statusEl) return;
+
+  statusEl.textContent = message;
+  statusEl.className = `banner ${type}`;
+  statusEl.classList.remove('hidden');
+
+  clearTimeout(statusTimeout);
+  if (type === 'info') {
+    statusTimeout = setTimeout(hideConnectionStatus, 3000);
+  }
+}
+
+function hideConnectionStatus() {
+  const statusEl = document.getElementById('videoNotice') || document.getElementById('chatNotice');
+  if (statusEl) {
+    statusEl.classList.add('hidden');
+  }
+}
+
+// Enhanced error handling for all buttons
+function handleButtonError(buttonId, error) {
+  console.error(`Button ${buttonId} error:`, error);
+  showConnectionStatus(`Action failed. Please try again.`, 'error');
+
+  // Add error state to button
+  const button = document.getElementById(buttonId);
+  if (button) {
+    button.classList.add('error-state');
+    setTimeout(() => button.classList.remove('error-state'), 2000);
+  }
+}
+
+// Enhanced chat input with auto-resize and emoji integration
+function initEnhancedChatInput() {
+  const chatInput = document.getElementById('chatInput');
+  const emojiBtnInline = document.getElementById('emojiBtnInline');
+  const sendBtn = document.getElementById('sendBtn');
+
+  if (!chatInput) return;
+
+  // Auto-resize textarea
+  function autoResize() {
+    chatInput.style.height = 'auto';
+    const maxHeight = 120;
+    const newHeight = Math.min(chatInput.scrollHeight, maxHeight);
+    chatInput.style.height = newHeight + 'px';
+
+    // Update parent container
+    const inputGroup = chatInput.closest('.chat-input-group');
+    if (inputGroup) {
+      inputGroup.style.alignItems = newHeight > 44 ? 'flex-end' : 'center';
+    }
+  }
+
+  // Enhanced emoji insertion
+  function insertEmoji(emoji) {
+    const start = chatInput.selectionStart;
+    const end = chatInput.selectionEnd;
+    const text = chatInput.value;
+
+    chatInput.value = text.substring(0, start) + emoji + text.substring(end);
+    chatInput.setSelectionRange(start + emoji.length, start + emoji.length);
+    chatInput.focus();
+    autoResize();
+  }
+
+  // Event listeners
+  chatInput.addEventListener('input', autoResize);
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (chatInput.value.trim()) {
+        sendBtn.click();
+      }
+    }
+  });
+
+  // Enhanced emoji button with quick emoji picker
+  if (emojiBtnInline) {
+    let emojiQuickPicker = null;
+
+    emojiBtnInline.addEventListener('click', (e) => {
+      e.preventDefault();
+
+      // Create quick emoji picker
+      if (!emojiQuickPicker) {
+        emojiQuickPicker = createQuickEmojiPicker();
+      }
+
+      // Position and show
+      const rect = emojiBtnInline.getBoundingClientRect();
+      emojiQuickPicker.style.left = rect.left + 'px';
+      emojiQuickPicker.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
+      emojiQuickPicker.classList.toggle('hidden');
+    });
+  }
+
+  // Create quick emoji picker
+  function createQuickEmojiPicker() {
+    const picker = document.createElement('div');
+    picker.className = 'quick-emoji-picker hidden';
+    picker.innerHTML = `
+      <div class="emoji-row">
+        ${['😊', '😂', '❤️', '👍', '👎', '😢', '😮', '😡'].map(emoji =>
+          `<button class="quick-emoji" data-emoji="${emoji}">${emoji}</button>`
+        ).join('')}
+      </div>
+      <div class="emoji-row">
+        ${['🎉', '🔥', '💯', '✨', '🤔', '👌', '🙌', '💪'].map(emoji =>
+          `<button class="quick-emoji" data-emoji="${emoji}">${emoji}</button>`
+        ).join('')}
+      </div>
+      <button class="emoji-more" id="emojiMoreBtn">More emojis...</button>
+    `;
+
+    // Add event listeners
+    picker.addEventListener('click', (e) => {
+      if (e.target.classList.contains('quick-emoji')) {
+        insertEmoji(e.target.dataset.emoji);
+        picker.classList.add('hidden');
+      } else if (e.target.id === 'emojiMoreBtn') {
+        showEmojiPalette();
+        picker.classList.add('hidden');
+      }
+    });
+
+    document.body.appendChild(picker);
+
+    // Hide on outside click
+    document.addEventListener('click', (e) => {
+      if (!picker.contains(e.target) && !emojiBtnInline.contains(e.target)) {
+        picker.classList.add('hidden');
+      }
+    });
+
+    return picker;
+  }
+
+  // Initial resize
+  autoResize();
+}
+
+// Initialize mobile-specific features
+function initMobileFeatures() {
+  // Mobile chat toggle
+  const mobileChatToggle = document.getElementById('mobileChatToggle');
+  const mobileChatOverlay = document.getElementById('mobileChatOverlay');
+  const mobileChatInput = document.getElementById('mobileChatInput');
+  const mobileChatSend = document.getElementById('mobileChatSend');
+  const mobileChatMessages = document.getElementById('mobileChatMessages');
+
+  if (mobileChatToggle && mobileChatOverlay) {
+    mobileChatToggle.addEventListener('click', () => {
+      mobileChatOverlay.classList.toggle('visible');
+      if (mobileChatOverlay.classList.contains('visible')) {
+        mobileChatInput.focus();
+      }
+    });
+  }
+
+  // Mobile chat send
+  if (mobileChatSend && mobileChatInput) {
+    const sendMessage = () => {
+      const message = mobileChatInput.value.trim();
+      if (message) {
+        // Add message to UI
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'mobile-chat-message own';
+        messageDiv.textContent = message;
+        mobileChatMessages.appendChild(messageDiv);
+
+        // Send via socket
+        socket.emit('chat-message', {
+          text: message,
+          isAnonymous: false,
+          timestamp: Date.now()
+        });
+
+        mobileChatInput.value = '';
+        mobileChatMessages.scrollTop = mobileChatMessages.scrollHeight;
+      }
+    };
+
+    mobileChatSend.addEventListener('click', sendMessage);
+    mobileChatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        sendMessage();
+      }
+    });
+  }
+
+  // 3-dot menu overlay
+  const testsBtn = document.getElementById('testsBtn');
+  const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
+
+  if (testsBtn && mobileMenuOverlay) {
+    testsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      mobileMenuOverlay.classList.add('visible');
+    });
+
+    // Close menu on background click
+    mobileMenuOverlay.addEventListener('click', (e) => {
+      if (e.target === mobileMenuOverlay) {
+        mobileMenuOverlay.classList.remove('visible');
+      }
+    });
+  }
+
+  // Menu option handlers
+  const mobileEmotionsBtn = document.getElementById('mobileEmotionsBtn');
+  const mobileEmojiBtn = document.getElementById('mobileEmojiBtn');
+  const mobilePollsBtn = document.getElementById('mobilePollsBtn');
+  const mobileParticipantsBtn = document.getElementById('mobileParticipantsBtn');
+
+  if (mobileEmotionsBtn) {
+    mobileEmotionsBtn.addEventListener('click', () => {
+      mobileMenuOverlay.classList.remove('visible');
+      showEmotionPalette();
+    });
+  }
+
+  if (mobileEmojiBtn) {
+    mobileEmojiBtn.addEventListener('click', () => {
+      mobileMenuOverlay.classList.remove('visible');
+      showEmojiPalette();
+    });
+  }
+
+  if (mobilePollsBtn) {
+    mobilePollsBtn.addEventListener('click', () => {
+      mobileMenuOverlay.classList.remove('visible');
+      openTestOverlay();
+    });
+  }
+
+  if (mobileParticipantsBtn) {
+    mobileParticipantsBtn.addEventListener('click', () => {
+      mobileMenuOverlay.classList.remove('visible');
+      openModal('participantsDrawer');
+    });
+  }
+
+  // Handle incoming chat messages
+  socket.on('chat-message', (data) => {
+    if (mobileChatMessages) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'mobile-chat-message';
+      messageDiv.textContent = `${data.sender}: ${data.text}`;
+      mobileChatMessages.appendChild(messageDiv);
+      mobileChatMessages.scrollTop = mobileChatMessages.scrollHeight;
+    }
+  });
+}
 
 bootstrap();

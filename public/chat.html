@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Kaminskyi AI Messenger</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="mobile.css">
+  <link rel="stylesheet" href="desktop.css">
 </head>
 <body class="chat-body">
   <div id="nameModal" class="modal hidden">
@@ -67,6 +70,12 @@
     <div class="sheet-body" id="testOverlayContent"></div>
   </aside>
 
+  <!-- Mobile Top Navigation -->
+  <div class="mobile-top-nav">
+    <button class="nav-btn nav-btn-back" id="mobileBackBtn" title="Back"></button>
+    <button class="nav-btn nav-btn-expand" id="mobileExpandBtn" title="Expand"></button>
+  </div>
+
   <header class="chat-header">
     <div class="header-info">
       <h1 id="chatTitle"></h1>
@@ -112,25 +121,66 @@
       </div>
       <div class="floating-controls" id="floatingControls">
         <div class="control-bar primary">
-          <button id="muteBtn" class="control" title="Toggle microphone"></button>
-          <button id="videoBtn" class="control" title="Toggle camera"></button>
-          <button id="cameraFlipBtn" class="control" title="Flip camera"></button>
-          <button id="screenShareBtn" class="control" title="Share screen"></button>
-          <button id="layoutToggleBtn" class="control" title="Toggle layout"></button>
-          <button id="pipBtn" class="control" title="Picture in picture"></button>
-          <button id="fullscreenBtn" class="control" title="Fullscreen"></button>
-          <button id="leaveBtn" class="control leave" title="Leave meeting"></button>
+          <button id="leaveBtn" class="control leave" title="End call"></button>
         </div>
         <div class="control-bar secondary">
-          <button id="copyLinkBtn" class="ghost" title="Copy link"></button>
-          <button id="emotionPanelBtn" class="ghost" title="Emotions"></button>
-          <button id="emojiPaletteBtn" class="ghost" title="Emojis"></button>
-          <button id="testsBtn" class="ghost" title="Tests"></button>
-          <button id="endMeetingBtn" class="ghost hidden" title="End meeting"></button>
+          <button id="copyLinkBtn" class="control" title="Share"></button>
+          <button id="cameraFlipBtn" class="control" title="Switch camera"></button>
+          <button class="control chat-toggle-btn" id="mobileChatToggle" title="Chat"></button>
+          <button id="testsBtn" class="control" title="More"></button>
         </div>
       </div>
+
+      <!-- TikTok-Style Chat Overlay -->
+      <div class="mobile-chat-overlay" id="mobileChatOverlay">
+        <div class="mobile-chat-messages" id="mobileChatMessages"></div>
+        <div class="mobile-chat-input-group">
+          <input type="text"
+                 class="mobile-chat-input"
+                 id="mobileChatInput"
+                 placeholder="Type a message...">
+          <button class="mobile-chat-send" id="mobileChatSend">→</button>
+        </div>
+      </div>
+
       <div id="videoNotice" class="banner hidden"></div>
     </section>
+
+    <!-- Mobile 3-Dot Menu Overlay -->
+    <div class="mobile-menu-overlay" id="mobileMenuOverlay">
+      <div class="mobile-menu-sheet">
+        <div class="mobile-menu-header">
+          <div class="mobile-menu-handle"></div>
+          <h3 class="mobile-menu-title">Features</h3>
+        </div>
+        <div class="mobile-menu-options">
+          <button class="mobile-menu-option" id="mobileEmotionsBtn">
+            <div class="mobile-menu-option-icon">😊</div>
+            <div class="mobile-menu-option-text">Emotions</div>
+          </button>
+          <button class="mobile-menu-option" id="mobileEmojiBtn">
+            <div class="mobile-menu-option-icon">🎭</div>
+            <div class="mobile-menu-option-text">Emojis</div>
+          </button>
+          <button class="mobile-menu-option" id="mobilePollsBtn">
+            <div class="mobile-menu-option-icon">📊</div>
+            <div class="mobile-menu-option-text">Polls</div>
+          </button>
+          <button class="mobile-menu-option" id="mobileParticipantsBtn">
+            <div class="mobile-menu-option-icon">👥</div>
+            <div class="mobile-menu-option-text">People</div>
+          </button>
+          <button class="mobile-menu-option" id="mobileSettingsBtn">
+            <div class="mobile-menu-option-icon">⚙️</div>
+            <div class="mobile-menu-option-text">Settings</div>
+          </button>
+          <button class="mobile-menu-option" id="mobileRecordBtn">
+            <div class="mobile-menu-option-icon">🔴</div>
+            <div class="mobile-menu-option-text">Record</div>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <aside class="collab-panel" id="collabPanel">
       <nav class="panel-tabs" id="collabTabs">
@@ -168,9 +218,18 @@
 
         <form id="chatForm">
           <div class="chat-input-group">
-            <button type="button" id="emojiBtnInline" class="ghost">😊</button>
-            <input id="chatInput" autocomplete="off">
-            <button class="primary" type="submit" id="sendBtn"></button>
+            <button type="button" id="emojiBtnInline" class="emoji-btn" title="Add emoji">😊</button>
+            <div class="input-wrapper">
+              <textarea id="chatInput"
+                        placeholder="Type a message..."
+                        autocomplete="off"
+                        rows="1"
+                        maxlength="2000"></textarea>
+            </div>
+            <button class="send-btn" type="submit" id="sendBtn" title="Send message">
+              <span class="send-icon">➤</span>
+              <span class="send-text">Send</span>
+            </button>
           </div>
         </form>
         <div id="chatNotice" class="banner hidden"></div>
