@@ -2987,4 +2987,369 @@ function addSessionDurationDisplay() {
   }
 }
 
+// ===== ENHANCED FUNCTIONALITY =====
+
+// Call Timer
+let callStartTime = null;
+let timerInterval = null;
+
+function startCallTimer() {
+  callStartTime = Date.now();
+  const timerEl = document.getElementById('callTimer');
+  if (timerEl) {
+    timerEl.classList.remove('hidden');
+
+    timerInterval = setInterval(() => {
+      const elapsed = Date.now() - callStartTime;
+      const minutes = Math.floor(elapsed / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+      timerEl.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }, 1000);
+  }
+}
+
+function stopCallTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  const timerEl = document.getElementById('callTimer');
+  if (timerEl) {
+    timerEl.classList.add('hidden');
+  }
+  callStartTime = null;
+}
+
+// Video Drag & Drop
+let isDragging = false;
+let dragOffset = { x: 0, y: 0 };
+
+function initDragAndDrop() {
+  const localVideo = document.querySelector('.video-wrapper.self');
+  if (localVideo) {
+    localVideo.addEventListener('mousedown', startDrag);
+    localVideo.addEventListener('touchstart', startDrag, { passive: false });
+  }
+
+  document.addEventListener('mousemove', drag);
+  document.addEventListener('touchmove', drag, { passive: false });
+  document.addEventListener('mouseup', endDrag);
+  document.addEventListener('touchend', endDrag);
+}
+
+function startDrag(e) {
+  const wrapper = e.currentTarget;
+  if (!wrapper.classList.contains('self')) return;
+
+  isDragging = true;
+  wrapper.style.cursor = 'grabbing';
+
+  const rect = wrapper.getBoundingClientRect();
+  const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+  const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+  dragOffset.x = clientX - rect.left;
+  dragOffset.y = clientY - rect.top;
+
+  e.preventDefault();
+}
+
+function drag(e) {
+  if (!isDragging) return;
+
+  const wrapper = document.querySelector('.video-wrapper.self');
+  const videoStage = document.getElementById('videoStage');
+  if (!wrapper || !videoStage) return;
+
+  const stageRect = videoStage.getBoundingClientRect();
+  const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+  const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+  let newX = clientX - stageRect.left - dragOffset.x;
+  let newY = clientY - stageRect.top - dragOffset.y;
+
+  // Constrain within video stage
+  const wrapperWidth = 120;
+  const wrapperHeight = 160;
+  newX = Math.max(16, Math.min(newX, stageRect.width - wrapperWidth - 16));
+  newY = Math.max(80, Math.min(newY, stageRect.height - wrapperHeight - 16));
+
+  wrapper.style.left = newX + 'px';
+  wrapper.style.top = newY + 'px';
+  wrapper.style.right = 'auto';
+
+  e.preventDefault();
+}
+
+function endDrag() {
+  if (!isDragging) return;
+
+  isDragging = false;
+  const wrapper = document.querySelector('.video-wrapper.self');
+  if (wrapper) {
+    wrapper.style.cursor = 'move';
+  }
+}
+
+// Enhanced Modal System
+function openModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closeModal(modalId) {
+  const modal = document.getElementById(modalId);
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+// Enhanced Emotion System
+function showEmotionPalette() {
+  openModal('emotionPalette');
+  populateEmotionGrid();
+}
+
+function showEmojiPalette() {
+  openModal('emojiPalette');
+  populateEmojiGrid();
+}
+
+function populateEmotionGrid() {
+  const grid = document.getElementById('emotionGrid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+
+  EMOTION_CATALOG.forEach(emotion => {
+    const button = document.createElement('button');
+    button.className = 'emotion-chip';
+    button.style.borderColor = emotion.color;
+    button.textContent = emotion.labels[state.language] || emotion.labels.en;
+    button.addEventListener('click', () => {
+      selectEmotion(emotion.key);
+      closeModal('emotionPalette');
+    });
+    grid.appendChild(button);
+  });
+}
+
+function populateEmojiGrid() {
+  const grid = document.getElementById('emojiGrid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+
+  EMOJI_SET.forEach(emoji => {
+    const button = document.createElement('button');
+    button.className = 'emoji-btn';
+    button.textContent = emoji;
+    button.addEventListener('click', () => {
+      sendEmoji(emoji);
+      closeModal('emojiPalette');
+    });
+    grid.appendChild(button);
+  });
+}
+
+function selectEmotion(emotionKey) {
+  socket.emit('emotion-signal', { emotion: emotionKey });
+  showNotification('Emotion sent!', 'success');
+}
+
+function sendEmoji(emoji) {
+  const messageText = emoji;
+  socket.emit('chat-message', { text: messageText, isEmoji: true });
+}
+
+// Enhanced Test System with AI Generation
+function openTestOverlay() {
+  openModal('testOverlay');
+  populateTestContent();
+}
+
+function populateTestContent() {
+  const content = document.getElementById('testOverlayContent');
+  if (!content) return;
+
+  content.innerHTML = `
+    <div class="test-generation">
+      <h3>AI Test Generator</h3>
+      <textarea id="testPrompt" placeholder="Describe what kind of sociometric test you want to generate..." rows="3"></textarea>
+      <button id="generateTestBtn" class="primary">Generate Test</button>
+    </div>
+    <div class="test-list" id="testList">
+      <h4>Available Tests</h4>
+      <div class="test-item" data-test="pulse">
+        <h5>Pulse Check</h5>
+        <p>Quick 3-minute mood and energy assessment</p>
+        <button class="start-test" data-duration="180">Start</button>
+      </div>
+      <div class="test-item" data-test="focus">
+        <h5>Focus Scan</h5>
+        <p>5-minute attention and engagement evaluation</p>
+        <button class="start-test" data-duration="300">Start</button>
+      </div>
+      <div class="test-item" data-test="resonance">
+        <h5>Group Resonance</h5>
+        <p>5-minute team harmony analysis</p>
+        <button class="start-test" data-duration="300">Start</button>
+      </div>
+    </div>
+  `;
+
+  // Add event listeners
+  const generateBtn = document.getElementById('generateTestBtn');
+  if (generateBtn) {
+    generateBtn.addEventListener('click', generateAITest);
+  }
+
+  document.querySelectorAll('.start-test').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const duration = parseInt(e.target.dataset.duration);
+      const testType = e.target.closest('.test-item').dataset.test;
+      startSociometricTest(testType, duration);
+    });
+  });
+}
+
+async function generateAITest() {
+  const prompt = document.getElementById('testPrompt').value;
+  if (!prompt.trim()) return;
+
+  showNotification('Generating test...', 'info');
+
+  // Simulate AI generation (would connect to actual AI service)
+  setTimeout(() => {
+    const generatedTest = {
+      id: Date.now(),
+      title: `AI Generated: ${prompt.substring(0, 30)}...`,
+      description: `Custom test based on: "${prompt}"`,
+      questions: generateTestQuestions(prompt),
+      duration: 240
+    };
+
+    addGeneratedTest(generatedTest);
+    showNotification('Test generated successfully!', 'success');
+  }, 2000);
+}
+
+function generateTestQuestions(prompt) {
+  // Simplified test generation - would use actual AI
+  const baseQuestions = [
+    { text: `How relevant is this topic: "${prompt}"?`, type: 'scale', scale: 5 },
+    { text: 'How engaged do you feel right now?', type: 'scale', scale: 5 },
+    { text: 'Any additional thoughts?', type: 'text' }
+  ];
+
+  return baseQuestions;
+}
+
+function addGeneratedTest(test) {
+  const testList = document.getElementById('testList');
+  if (!testList) return;
+
+  const testItem = document.createElement('div');
+  testItem.className = 'test-item generated';
+  testItem.innerHTML = `
+    <h5>${test.title}</h5>
+    <p>${test.description}</p>
+    <button class="start-test" data-test-id="${test.id}">Start (${Math.floor(test.duration / 60)}min)</button>
+  `;
+
+  testList.appendChild(testItem);
+
+  testItem.querySelector('.start-test').addEventListener('click', () => {
+    startCustomTest(test);
+  });
+}
+
+function startSociometricTest(testType, duration) {
+  socket.emit('start-sociometric-test', { testType, duration });
+  closeModal('testOverlay');
+  showNotification('Test started!', 'success');
+}
+
+function startCustomTest(test) {
+  socket.emit('start-custom-test', test);
+  closeModal('testOverlay');
+  showNotification('Custom test started!', 'success');
+}
+
+function showNotification(message, type = 'info') {
+  // Simple notification system
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    z-index: 1000;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  `;
+
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    notification.style.opacity = '0';
+    notification.style.transform = 'translateX(100%)';
+    setTimeout(() => notification.remove(), 300);
+  }, 3000);
+}
+
+// Enhanced Event Listeners
+document.addEventListener('DOMContentLoaded', () => {
+  // Side controls
+  const sideVideoToggle = document.getElementById('sideVideoToggle');
+  const sideAudioToggle = document.getElementById('sideAudioToggle');
+
+  if (sideVideoToggle) sideVideoToggle.addEventListener('click', () => toggleVideo());
+  if (sideAudioToggle) sideAudioToggle.addEventListener('click', () => toggleAudio());
+
+  // Modal close buttons
+  const emotionPaletteClose = document.getElementById('emotionPaletteClose');
+  const emojiPaletteClose = document.getElementById('emojiPaletteClose');
+  const testOverlayClose = document.getElementById('testOverlayClose');
+  const participantsDrawerClose = document.getElementById('participantsDrawerClose');
+
+  if (emotionPaletteClose) emotionPaletteClose.addEventListener('click', () => closeModal('emotionPalette'));
+  if (emojiPaletteClose) emojiPaletteClose.addEventListener('click', () => closeModal('emojiPalette'));
+  if (testOverlayClose) testOverlayClose.addEventListener('click', () => closeModal('testOverlay'));
+  if (participantsDrawerClose) participantsDrawerClose.addEventListener('click', () => closeModal('participantsDrawer'));
+
+  // Enhanced button functionality
+  const emotionPanelBtn = document.getElementById('emotionPanelBtn');
+  const emojiPaletteBtn = document.getElementById('emojiPaletteBtn');
+  const testsBtn = document.getElementById('testsBtn');
+  const openParticipantsBtn = document.getElementById('openParticipantsBtn');
+  const profileDrawerBtn = document.getElementById('profileDrawerBtn');
+
+  if (emotionPanelBtn) emotionPanelBtn.addEventListener('click', showEmotionPalette);
+  if (emojiPaletteBtn) emojiPaletteBtn.addEventListener('click', showEmojiPalette);
+  if (testsBtn) testsBtn.addEventListener('click', openTestOverlay);
+  if (openParticipantsBtn) openParticipantsBtn.addEventListener('click', () => openModal('participantsDrawer'));
+  if (profileDrawerBtn) profileDrawerBtn.addEventListener('click', () => openModal('participantsDrawer'));
+
+  // Initialize drag and drop
+  setTimeout(initDragAndDrop, 1000);
+
+  // Start timer when joining meeting
+  setTimeout(() => {
+    if (state.inMeeting) {
+      startCallTimer();
+    }
+  }, 2000);
+});
+
 bootstrap();

@@ -87,6 +87,13 @@
 
   <main class="chat-main">
     <section class="video-stage" id="videoStage">
+      <div class="call-timer hidden" id="callTimer">00:00</div>
+
+      <div class="side-controls" id="sideControls">
+        <button class="side-control" id="sideVideoToggle" title="Toggle Video">📹</button>
+        <button class="side-control" id="sideAudioToggle" title="Toggle Audio">🎙️</button>
+      </div>
+
       <div class="stage-meta">
         <span class="badge" id="roleBadge"></span>
         <div class="participants" id="participants"></div>
@@ -115,11 +122,11 @@
           <button id="leaveBtn" class="control leave" title="Leave meeting"></button>
         </div>
         <div class="control-bar secondary">
-          <button id="copyLinkBtn" class="ghost"></button>
-          <button id="emotionPanelBtn" class="ghost"></button>
-          <button id="emojiPaletteBtn" class="ghost">😊</button>
-          <button id="testsBtn" class="ghost hidden"></button>
-          <button id="endMeetingBtn" class="ghost hidden"></button>
+          <button id="copyLinkBtn" class="ghost" title="Copy link"></button>
+          <button id="emotionPanelBtn" class="ghost" title="Emotions"></button>
+          <button id="emojiPaletteBtn" class="ghost" title="Emojis"></button>
+          <button id="testsBtn" class="ghost" title="Tests"></button>
+          <button id="endMeetingBtn" class="ghost hidden" title="End meeting"></button>
         </div>
       </div>
       <div id="videoNotice" class="banner hidden"></div>
