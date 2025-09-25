@@ -64,13 +64,177 @@ redis.on('ready', () => {
   console.log('🚀 Redis is ready for operations');
 });
 
-// Connect to Redis with error handling
-try {
-  await redis.connect();
-} catch (error) {
-  console.error('⚠️  Failed to connect to Redis. Server will continue but with limited functionality.');
-  console.log('📖 Check REDIS_SETUP.md for setup instructions');
+// Connect to Redis with graceful error handling
+async function connectRedis() {
+  try {
+    await redis.connect();
+    return true;
+  } catch (error) {
+    console.error('⚠️  Failed to connect to Redis. Server will continue with in-memory storage.');
+    console.log('📖 For production deployment, ensure Redis is available or set REDIS_URL correctly');
+    console.log('🔧 Running without Redis - data will not persist between restarts');
+    return false;
+  }
 }
+
+// Attempt Redis connection but don't block server startup
+const redisConnected = await connectRedis();
+
+// In-memory fallback storage for when Redis is unavailable
+let memoryStorage = {
+  meetings: new Map(),
+  participants: new Map(),
+  messages: new Map(),
+  sessions: new Map(),
+  polls: new Map(),
+  emotions: new Map(),
+  activeRooms: new Set(),
+  roomHosts: new Map()
+};
+
+// Safe Redis wrapper that falls back to memory storage
+const SafeRedis = {
+  async isConnected() {
+    return isRedisConnected && redis.isReady;
+  },
+
+  async hSet(key, data) {
+    if (await this.isConnected()) {
+      return await SafeRedis.hSet(key, data);
+    } else {
+      // Fallback to memory
+      memoryStorage.meetings.set(key, data);
+      return 'OK';
+    }
+  },
+
+  async hGetAll(key) {
+    if (await this.isConnected()) {
+      return await SafeRedis.hGetAll(key);
+    } else {
+      // Fallback to memory
+      return memoryStorage.meetings.get(key) || {};
+    }
+  },
+
+  async set(key, value) {
+    if (await this.isConnected()) {
+      return await SafeRedis.set(key, value);
+    } else {
+      // Fallback to memory
+      memoryStorage.sessions.set(key, value);
+      return 'OK';
+    }
+  },
+
+  async get(key) {
+    if (await this.isConnected()) {
+      return await SafeRedis.get(key);
+    } else {
+      // Fallback to memory
+      return memoryStorage.sessions.get(key) || null;
+    }
+  },
+
+  async sAdd(key, member) {
+    if (await this.isConnected()) {
+      return await SafeRedis.sAdd(key, member);
+    } else {
+      // Fallback to memory
+      if (key.includes('active_rooms')) {
+        memoryStorage.activeRooms.add(member);
+      }
+      return 1;
+    }
+  },
+
+  async sRem(key, member) {
+    if (await this.isConnected()) {
+      return await SafeRedis.sRem(key, member);
+    } else {
+      // Fallback to memory
+      if (key.includes('active_rooms')) {
+        return memoryStorage.activeRooms.delete(member) ? 1 : 0;
+      }
+      return 0;
+    }
+  },
+
+  async sMembers(key) {
+    if (await this.isConnected()) {
+      return await SafeRedis.sMembers(key);
+    } else {
+      // Fallback to memory
+      if (key.includes('active_rooms')) {
+        return Array.from(memoryStorage.activeRooms);
+      }
+      return [];
+    }
+  },
+
+  async expire(key, seconds) {
+    if (await this.isConnected()) {
+      return await SafeRedis.expire(key, seconds);
+    } else {
+      // In memory storage doesn't support expiration, but that's okay for dev
+      console.log(`🕐 Would expire ${key} in ${seconds} seconds (memory mode)`);
+      return 1;
+    }
+  },
+
+  async del(keys) {
+    if (await this.isConnected()) {
+      return await SafeRedis.del(keys);
+    } else {
+      // Fallback to memory cleanup
+      let deletedCount = 0;
+      keys.forEach(key => {
+        if (memoryStorage.meetings.delete(key)) deletedCount++;
+        if (memoryStorage.sessions.delete(key)) deletedCount++;
+        if (memoryStorage.participants.delete(key)) deletedCount++;
+        if (memoryStorage.messages.delete(key)) deletedCount++;
+      });
+      return deletedCount;
+    }
+  },
+
+  async lPush(key, value) {
+    if (await this.isConnected()) {
+      return await SafeRedis.lPush(key, value);
+    } else {
+      // Fallback to memory
+      if (!memoryStorage.messages.has(key)) {
+        memoryStorage.messages.set(key, []);
+      }
+      memoryStorage.messages.get(key).unshift(value);
+      return memoryStorage.messages.get(key).length;
+    }
+  },
+
+  async lRange(key, start, end) {
+    if (await this.isConnected()) {
+      return await redis.lRange(key, start, end);
+    } else {
+      // Fallback to memory
+      const messages = memoryStorage.messages.get(key) || [];
+      if (end === -1) return messages.slice(start);
+      return messages.slice(start, end + 1);
+    }
+  },
+
+  async lTrim(key, start, stop) {
+    if (await this.isConnected()) {
+      return await redis.lTrim(key, start, stop);
+    } else {
+      // Fallback to memory - trim the array
+      if (memoryStorage.messages.has(key)) {
+        const messages = memoryStorage.messages.get(key);
+        memoryStorage.messages.set(key, messages.slice(start, stop + 1));
+      }
+      return 'OK';
+    }
+  }
+};
 
 // Redis utility functions for session data management
 const RedisKeys = {
@@ -108,22 +272,22 @@ const RedisHelper = {
       metadata: JSON.stringify({})
     };
 
-    await redis.hSet(RedisKeys.meeting(token), meetingData);
-    await redis.set(RedisKeys.roomHost(token), host);
-    await redis.sAdd(RedisKeys.activeRooms(), token);
-    await redis.expire(RedisKeys.meeting(token), 24 * 60 * 60);
-    await redis.expire(RedisKeys.roomHost(token), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.meeting(token), meetingData);
+    await SafeRedis.set(RedisKeys.roomHost(token), host);
+    await SafeRedis.sAdd(RedisKeys.activeRooms(), token);
+    await SafeRedis.expire(RedisKeys.meeting(token), 24 * 60 * 60);
+    await SafeRedis.expire(RedisKeys.roomHost(token), 24 * 60 * 60);
 
     return meetingData;
   },
 
   async getMeeting(token) {
-    const meeting = await redis.hGetAll(RedisKeys.meeting(token));
+    const meeting = await SafeRedis.hGetAll(RedisKeys.meeting(token));
     return Object.keys(meeting).length > 0 ? meeting : null;
   },
 
   async getRoomHost(token) {
-    return await redis.get(RedisKeys.roomHost(token));
+    return await SafeRedis.get(RedisKeys.roomHost(token));
   },
 
   async deleteMeeting(token) {
@@ -150,7 +314,7 @@ const RedisHelper = {
   // Participant management
   async addParticipant(token, participantData) {
     const participantKey = RedisKeys.participant(token, participantData.name);
-    await redis.hSet(participantKey, {
+    await SafeRedis.hSet(participantKey, {
       ...participantData,
       joinedAt: new Date().toISOString(),
       status: 'online',
@@ -158,21 +322,21 @@ const RedisHelper = {
       videoEnabled: 'true'
     });
 
-    await redis.sAdd(RedisKeys.participants(token), participantData.name);
-    await redis.expire(participantKey, 24 * 60 * 60);
+    await SafeRedis.sAdd(RedisKeys.participants(token), participantData.name);
+    await SafeRedis.expire(participantKey, 24 * 60 * 60);
   },
 
   async removeParticipant(token, participantName) {
-    await redis.sRem(RedisKeys.participants(token), participantName);
-    await redis.del(RedisKeys.participant(token, participantName));
+    await SafeRedis.sRem(RedisKeys.participants(token), participantName);
+    await SafeRedis.del(RedisKeys.participant(token, participantName));
   },
 
   async getParticipants(token) {
-    const participantNames = await redis.sMembers(RedisKeys.participants(token));
+    const participantNames = await SafeRedis.sMembers(RedisKeys.participants(token));
     const participants = [];
 
     for (const name of participantNames) {
-      const data = await redis.hGetAll(RedisKeys.participant(token, name));
+      const data = await SafeRedis.hGetAll(RedisKeys.participant(token, name));
       if (Object.keys(data).length > 0) {
         participants.push(data);
       }
@@ -189,15 +353,15 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.lPush(RedisKeys.messages(token), JSON.stringify(messageWithId));
-    await redis.lTrim(RedisKeys.messages(token), 0, 999);
-    await redis.expire(RedisKeys.messages(token), 24 * 60 * 60);
+    await SafeRedis.lPush(RedisKeys.messages(token), JSON.stringify(messageWithId));
+    await SafeRedis.lTrim(RedisKeys.messages(token), 0, 999);
+    await SafeRedis.expire(RedisKeys.messages(token), 24 * 60 * 60);
 
     return messageWithId;
   },
 
   async getMessages(token, limit = 100) {
-    const messages = await redis.lRange(RedisKeys.messages(token), 0, limit - 1);
+    const messages = await SafeRedis.lRange(RedisKeys.messages(token), 0, limit - 1);
     return messages.map(msg => JSON.parse(msg)).reverse();
   },
 
@@ -212,15 +376,15 @@ const RedisHelper = {
       options: JSON.stringify(pollData.options)
     };
 
-    await redis.hSet(RedisKeys.poll(token, pollId), poll);
-    await redis.sAdd(RedisKeys.polls(token), pollId);
-    await redis.expire(RedisKeys.poll(token, pollId), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.poll(token, pollId), poll);
+    await SafeRedis.sAdd(RedisKeys.polls(token), pollId);
+    await SafeRedis.expire(RedisKeys.poll(token, pollId), 24 * 60 * 60);
 
     return { ...poll, options: pollData.options };
   },
 
   async getPoll(token, pollId) {
-    const poll = await redis.hGetAll(RedisKeys.poll(token, pollId));
+    const poll = await SafeRedis.hGetAll(RedisKeys.poll(token, pollId));
     if (Object.keys(poll).length > 0) {
       poll.options = JSON.parse(poll.options);
       return poll;
@@ -235,12 +399,12 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.hSet(RedisKeys.pollVotes(token, pollId), participant, JSON.stringify(voteData));
-    await redis.expire(RedisKeys.pollVotes(token, pollId), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.pollVotes(token, pollId), participant, JSON.stringify(voteData));
+    await SafeRedis.expire(RedisKeys.pollVotes(token, pollId), 24 * 60 * 60);
   },
 
   async getPollResults(token, pollId) {
-    const votes = await redis.hGetAll(RedisKeys.pollVotes(token, pollId));
+    const votes = await SafeRedis.hGetAll(RedisKeys.pollVotes(token, pollId));
     const results = {};
 
     Object.values(votes).forEach(voteStr => {
@@ -259,14 +423,14 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.hSet(RedisKeys.emotions(token), participant, JSON.stringify(emotionData));
-    await redis.expire(RedisKeys.emotions(token), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.emotions(token), participant, JSON.stringify(emotionData));
+    await SafeRedis.expire(RedisKeys.emotions(token), 24 * 60 * 60);
 
     return await this.updateEmotionalClimate(token);
   },
 
   async updateEmotionalClimate(token) {
-    const emotions = await redis.hGetAll(RedisKeys.emotions(token));
+    const emotions = await SafeRedis.hGetAll(RedisKeys.emotions(token));
     const emotionList = Object.values(emotions).map(e => JSON.parse(e));
 
     const emotionMap = {
@@ -296,17 +460,17 @@ const RedisHelper = {
       lastUpdated: new Date().toISOString()
     };
 
-    await redis.hSet(RedisKeys.emotionClimate(token), {
+    await SafeRedis.hSet(RedisKeys.emotionClimate(token), {
       ...climate,
       topEmotions: JSON.stringify(topEmotions)
     });
-    await redis.expire(RedisKeys.emotionClimate(token), 24 * 60 * 60);
+    await SafeRedis.expire(RedisKeys.emotionClimate(token), 24 * 60 * 60);
 
     return climate;
   },
 
   async getEmotionalClimate(token) {
-    const climate = await redis.hGetAll(RedisKeys.emotionClimate(token));
+    const climate = await SafeRedis.hGetAll(RedisKeys.emotionClimate(token));
     if (Object.keys(climate).length > 0) {
       climate.topEmotions = JSON.parse(climate.topEmotions);
       return climate;
@@ -326,15 +490,15 @@ const RedisHelper = {
       participants: JSON.stringify(testData.participants)
     };
 
-    await redis.hSet(RedisKeys.sociometryTest(token, testId), test);
-    await redis.sAdd(RedisKeys.sociometry(token), testId);
-    await redis.expire(RedisKeys.sociometryTest(token, testId), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.sociometryTest(token, testId), test);
+    await SafeRedis.sAdd(RedisKeys.sociometry(token), testId);
+    await SafeRedis.expire(RedisKeys.sociometryTest(token, testId), 24 * 60 * 60);
 
     return { ...test, questions: testData.questions, participants: testData.participants };
   },
 
   async getSociometryTest(token, testId) {
-    const test = await redis.hGetAll(RedisKeys.sociometryTest(token, testId));
+    const test = await SafeRedis.hGetAll(RedisKeys.sociometryTest(token, testId));
     if (Object.keys(test).length > 0) {
       test.questions = JSON.parse(test.questions);
       test.participants = JSON.parse(test.participants);
@@ -350,12 +514,12 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.hSet(RedisKeys.sociometryResponses(token, testId), participant, JSON.stringify(responseData));
-    await redis.expire(RedisKeys.sociometryResponses(token, testId), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.sociometryResponses(token, testId), participant, JSON.stringify(responseData));
+    await SafeRedis.expire(RedisKeys.sociometryResponses(token, testId), 24 * 60 * 60);
   },
 
   async getSociometryResponses(token, testId) {
-    const responses = await redis.hGetAll(RedisKeys.sociometryResponses(token, testId));
+    const responses = await SafeRedis.hGetAll(RedisKeys.sociometryResponses(token, testId));
     const result = {};
 
     Object.entries(responses).forEach(([participant, responseStr]) => {
@@ -379,9 +543,9 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.lPush(RedisKeys.assistant(token), JSON.stringify(interaction));
-    await redis.lTrim(RedisKeys.assistant(token), 0, 99);
-    await redis.expire(RedisKeys.assistant(token), 24 * 60 * 60);
+    await SafeRedis.lPush(RedisKeys.assistant(token), JSON.stringify(interaction));
+    await SafeRedis.lTrim(RedisKeys.assistant(token), 0, 99);
+    await SafeRedis.expire(RedisKeys.assistant(token), 24 * 60 * 60);
   },
 
   // Connection management
@@ -393,19 +557,19 @@ const RedisHelper = {
       timestamp: new Date().toISOString()
     };
 
-    await redis.lPush(RedisKeys.connections(token), JSON.stringify(logEntry));
-    await redis.lTrim(RedisKeys.connections(token), 0, 999);
-    await redis.expire(RedisKeys.connections(token), 24 * 60 * 60);
+    await SafeRedis.lPush(RedisKeys.connections(token), JSON.stringify(logEntry));
+    await SafeRedis.lTrim(RedisKeys.connections(token), 0, 999);
+    await SafeRedis.expire(RedisKeys.connections(token), 24 * 60 * 60);
   },
 
   // Session management
   async updateSession(token, sessionData) {
-    await redis.hSet(RedisKeys.session(token), sessionData);
-    await redis.expire(RedisKeys.session(token), 24 * 60 * 60);
+    await SafeRedis.hSet(RedisKeys.session(token), sessionData);
+    await SafeRedis.expire(RedisKeys.session(token), 24 * 60 * 60);
   },
 
   async getSession(token) {
-    const session = await redis.hGetAll(RedisKeys.session(token));
+    const session = await SafeRedis.hGetAll(RedisKeys.session(token));
     return Object.keys(session).length > 0 ? session : null;
   }
 };
@@ -414,10 +578,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Credentials for basic auth
-const validCredentials = [
-  { username: 'admin', password: 'admin' },
-  { username: 'test', password: 'test' }
-];
+const validCredentials = [];
 
 // Add credentials from environment variables
 if (process.env.USER1_NAME && process.env.USER1_PASS) {
@@ -1082,7 +1243,7 @@ setInterval(async () => {
   }
 
   try {
-    const activeRooms = await redis.sMembers(RedisKeys.activeRooms());
+    const activeRooms = await SafeRedis.sMembers(RedisKeys.activeRooms());
 
     for (const token of activeRooms) {
       const meeting = await RedisHelper.getMeeting(token);

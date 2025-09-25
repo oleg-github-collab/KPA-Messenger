@@ -152,30 +152,130 @@ class MobileVideoCall {
 
   async initializeMedia() {
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        video: {
+      // Get media preferences from login page
+      const enableVideo = this.getMediaPreference('enableVideo');
+      const enableAudio = this.getMediaPreference('enableAudio');
+
+      console.log('🎥 Mobile media preferences:', { video: enableVideo, audio: enableAudio });
+
+      const constraints = {};
+
+      // Only request video if enabled
+      if (enableVideo) {
+        constraints.video = {
           facingMode: 'user',
           width: { ideal: 640 },
           height: { ideal: 480 }
-        },
-        audio: {
+        };
+      }
+
+      // Only request audio if enabled
+      if (enableAudio) {
+        constraints.audio = {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
-        }
-      });
+        };
+      }
 
-      this.localVideo.srcObject = this.localStream;
-      this.localPlaceholder.style.display = 'none';
+      // If no media is enabled, create an empty stream
+      if (!enableVideo && !enableAudio) {
+        console.log('📺 No media requested, creating empty stream');
+        this.localStream = new MediaStream();
+        this.isVideoEnabled = false;
+        this.isAudioEnabled = false;
+      } else {
+        console.log('🎬 Requesting mobile media with constraints:', constraints);
+        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        this.isVideoEnabled = enableVideo && this.localStream.getVideoTracks().length > 0;
+        this.isAudioEnabled = enableAudio && this.localStream.getAudioTracks().length > 0;
+      }
+
+      // Set video source and handle placeholder
+      if (this.isVideoEnabled) {
+        this.localVideo.srcObject = this.localStream;
+        this.localPlaceholder.style.display = 'none';
+        console.log('✅ Mobile video enabled and connected');
+      } else {
+        this.localVideo.srcObject = null;
+        this.localPlaceholder.style.display = 'flex';
+        console.log('📷 Mobile video disabled, showing placeholder');
+      }
+
+      // Update UI to reflect actual media state
+      this.updateMediaControlsUI();
+
+      console.log('🚀 Mobile media initialization complete');
 
     } catch (error) {
-      console.error('Error accessing media devices:', error);
-      this.showNotification('Camera/microphone access denied', 'error');
+      console.error('💥 Mobile error accessing media devices:', error);
+
+      // Handle permission denials gracefully
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        this.showNotification('Camera/microphone access denied. You can still join with chat only.', 'warning');
+        this.createFallbackStream();
+      } else if (error.name === 'NotFoundError') {
+        this.showNotification('No camera/microphone found. Joining with chat only.', 'warning');
+        this.createFallbackStream();
+      } else {
+        this.showNotification('Media access failed. Joining with chat only.', 'error');
+        this.createFallbackStream();
+      }
+    }
+  }
+
+  getMediaPreference(key) {
+    // Try to get from URL params first (for deep linking)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has(key)) {
+      return urlParams.get(key) === 'true';
+    }
+
+    // Try to get from sessionStorage (from login page)
+    const stored = sessionStorage.getItem(key);
+    if (stored !== null) {
+      return stored === 'true';
+    }
+
+    // Default to enabled
+    return true;
+  }
+
+  createFallbackStream() {
+    // Create empty stream for chat-only mode
+    this.localStream = new MediaStream();
+    this.isVideoEnabled = false;
+    this.isAudioEnabled = false;
+    this.localVideo.srcObject = null;
+    this.localPlaceholder.style.display = 'flex';
+    this.updateMediaControlsUI();
+  }
+
+  updateMediaControlsUI() {
+    // Update video toggle button
+    const videoBtn = document.getElementById('videoBtn');
+    if (videoBtn) {
+      videoBtn.classList.toggle('disabled', !this.isVideoEnabled);
+      videoBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
+    }
+
+    // Update audio toggle button
+    const audioBtn = document.getElementById('audioBtn');
+    if (audioBtn) {
+      audioBtn.classList.toggle('disabled', !this.isAudioEnabled);
+      audioBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
     }
   }
 
   connectSocket() {
-    this.socket = io();
+    this.socket = io({
+      transports: ['websocket', 'polling'],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: this.maxReconnectAttempts || 50,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000
+    });
 
     this.socket.on('connect', () => {
       console.log('Connected to server');
@@ -217,8 +317,21 @@ class MobileVideoCall {
       this.showNotification('Meeting not found', 'error');
     });
 
-    this.socket.on('disconnect', () => {
-      this.showNotification('Connection lost', 'error');
+    this.socket.on('disconnect', (reason) => {
+      console.log('📱 Mobile disconnected:', reason);
+      this.showNotification('Connection lost, reconnecting...', 'warning');
+      this.handleDisconnection();
+    });
+
+    this.socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('📱 Mobile reconnection attempt:', attemptNumber);
+      this.showNotification(`Reconnecting... (${attemptNumber})`, 'warning');
+    });
+
+    this.socket.on('reconnect', () => {
+      console.log('📱 Mobile reconnected to server');
+      this.showNotification('Connected', 'success');
+      this.rejoinRoom();
     });
   }
 
@@ -671,6 +784,103 @@ class MobileVideoCall {
       }
     } catch (error) {
       console.error('Error exiting Picture-in-Picture:', error);
+    }
+  }
+
+  handleDisconnection() {
+    console.log('📱 Handling mobile disconnection');
+
+    // Initialize reconnection properties if they don't exist
+    if (!this.reconnectAttempts) this.reconnectAttempts = 0;
+    if (!this.maxReconnectAttempts) this.maxReconnectAttempts = 50;
+
+    // Start aggressive reconnection for mobile sessions
+    if (!this.reconnectInterval) {
+      this.reconnectInterval = setInterval(() => {
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          console.log(`📱 Mobile reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+
+          if (this.socket && !this.socket.connected) {
+            this.socket.connect();
+          }
+        } else {
+          clearInterval(this.reconnectInterval);
+          this.reconnectInterval = null;
+          this.showNotification('Connection lost. Please refresh the page.', 'error');
+        }
+      }, 5000);
+    }
+  }
+
+  async rejoinRoom() {
+    if (this.socket && this.roomToken && this.displayName) {
+      console.log('🔄 Mobile rejoining room after reconnection');
+
+      // First rejoin the room
+      this.socket.emit('join-room', {
+        roomToken: this.roomToken,
+        displayName: this.displayName
+      });
+
+      // Then attempt to restore media if it was lost
+      await this.attemptMediaRecovery();
+
+      // Reset reconnection counter on successful rejoin
+      this.reconnectAttempts = 0;
+      if (this.reconnectInterval) {
+        clearInterval(this.reconnectInterval);
+        this.reconnectInterval = null;
+      }
+    }
+  }
+
+  async attemptMediaRecovery() {
+    try {
+      console.log('🔧 Attempting mobile media recovery...');
+
+      // Check if local stream is still active
+      if (!this.localStream || this.localStream.getTracks().some(track => track.readyState !== 'live')) {
+        console.log('📹 Mobile local stream lost, attempting to restore...');
+
+        // Try to get media again with current preferences
+        await this.initializeMedia();
+
+        // If successful and we have a peer connection, update it
+        if (this.peerConnection && this.peerConnection.connectionState !== 'closed') {
+          try {
+            // Replace tracks in existing connection
+            const videoTrack = this.localStream.getVideoTracks()[0];
+            const audioTrack = this.localStream.getAudioTracks()[0];
+
+            const senders = this.peerConnection.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+
+            if (videoSender && videoTrack) {
+              await videoSender.replaceTrack(videoTrack);
+              console.log('✅ Mobile video track replaced');
+            }
+
+            if (audioSender && audioTrack) {
+              await audioSender.replaceTrack(audioTrack);
+              console.log('✅ Mobile audio track replaced');
+            }
+          } catch (error) {
+            console.error('❌ Failed to replace mobile tracks:', error);
+            // If track replacement fails, recreate peer connection
+            await this.createPeerConnection();
+          }
+        }
+
+        this.showNotification('Media connection restored', 'success');
+        console.log('🎉 Mobile media recovery completed successfully');
+      } else {
+        console.log('✅ Mobile media stream is healthy, no recovery needed');
+      }
+    } catch (error) {
+      console.error('💥 Mobile media recovery failed:', error);
+      this.showNotification('Unable to restore video/audio. Continuing with chat only.', 'warning');
     }
   }
 }

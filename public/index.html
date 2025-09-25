@@ -40,6 +40,26 @@
       </header>
 
       <div class="card-body">
+        <!-- Media Settings -->
+        <div class="media-settings">
+          <h3>Media Settings</h3>
+          <div class="media-options">
+            <label class="media-option">
+              <input type="checkbox" id="enableVideo" checked>
+              <span class="checkmark"></span>
+              <span class="option-text">Enable Video</span>
+              <div class="option-icon">📹</div>
+            </label>
+
+            <label class="media-option">
+              <input type="checkbox" id="enableAudio" checked>
+              <span class="checkmark"></span>
+              <span class="option-text">Enable Audio</span>
+              <div class="option-icon">🎤</div>
+            </label>
+          </div>
+        </div>
+
         <button id="createMeetingBtn" class="primary full-width"></button>
 
         <div class="meeting-options" id="meetingOptions">
@@ -302,6 +322,16 @@
     function openMeeting() {
       const token = openMeetingBtn.dataset.roomToken;
       if (!token) return;
+
+      // Store media preferences in sessionStorage
+      const enableVideo = document.getElementById('enableVideo').checked;
+      const enableAudio = document.getElementById('enableAudio').checked;
+
+      sessionStorage.setItem('enableVideo', enableVideo.toString());
+      sessionStorage.setItem('enableAudio', enableAudio.toString());
+
+      console.log('💾 Stored media preferences:', { video: enableVideo, audio: enableAudio });
+
       window.location.href = `/chat.html?room=${encodeURIComponent(token)}`;
     }
 
