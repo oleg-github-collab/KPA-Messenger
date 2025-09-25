@@ -43,6 +43,7 @@ class MobileVideoCall {
     this.shareButton = document.getElementById('shareButton');
     this.backButton = document.getElementById('backButton');
     this.expandIcon = document.getElementById('expandIcon');
+    this.fullscreenBtn = document.getElementById('fullscreenBtn');
 
     // UI elements
     this.callTimer = document.getElementById('callTimer');
@@ -83,6 +84,7 @@ class MobileVideoCall {
     this.shareButton.addEventListener('click', this.shareLink.bind(this));
     this.backButton.addEventListener('click', this.goBack.bind(this));
     this.expandIcon.addEventListener('click', this.toggleVideoSize.bind(this));
+    this.fullscreenBtn.addEventListener('click', this.toggleFullscreen.bind(this));
 
     // Name form
     this.nameForm.addEventListener('submit', this.submitName.bind(this));
@@ -100,6 +102,9 @@ class MobileVideoCall {
 
     // Screen tap to toggle controls
     this.mainVideo.addEventListener('click', this.toggleControlsVisibility.bind(this));
+
+    // Document visibility change (for PiP)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
   }
 
   checkRoomToken() {
@@ -439,6 +444,68 @@ class MobileVideoCall {
     this.expandIcon.textContent = smallVideo.classList.contains('expanded') ? '↙' : '↗';
   }
 
+  async toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement) {
+        // Enter fullscreen
+        const element = document.documentElement;
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+          await element.webkitRequestFullscreen();
+        } else if (element.mozRequestFullScreen) {
+          await element.mozRequestFullScreen();
+        } else if (element.msRequestFullscreen) {
+          await element.msRequestFullscreen();
+        }
+
+        this.fullscreenBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        `;
+        this.fullscreenBtn.title = 'Exit fullscreen';
+        this.showNotification('Entered fullscreen mode', 'success');
+
+        // Hide mobile browser bars on fullscreen
+        if (screen.orientation && screen.orientation.lock) {
+          try {
+            await screen.orientation.lock('landscape');
+          } catch (e) {
+            console.log('Orientation lock not available');
+          }
+        }
+      } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
+
+        this.fullscreenBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        `;
+        this.fullscreenBtn.title = 'Toggle fullscreen';
+        this.showNotification('Exited fullscreen mode', 'success');
+
+        // Unlock orientation on exit
+        if (screen.orientation && screen.orientation.unlock) {
+          screen.orientation.unlock();
+        }
+      }
+    } catch (error) {
+      console.error('Fullscreen error:', error);
+      this.showNotification('Fullscreen not supported', 'error');
+    }
+  }
+
   // Chat functionality
   openChat() {
     this.mobileChatOverlay.classList.add('active');
@@ -565,6 +632,46 @@ class MobileVideoCall {
     setTimeout(() => {
       this.videoNotice.classList.add('hidden');
     }, 4000);
+  }
+
+  async handleVisibilityChange() {
+    if (document.hidden) {
+      // Browser is not visible, try to enter PiP mode
+      await this.enterPictureInPicture();
+    } else {
+      // Browser is visible again, exit PiP mode
+      await this.exitPictureInPicture();
+    }
+  }
+
+  async enterPictureInPicture() {
+    try {
+      // Only enter PiP if we have video playing and PiP is supported
+      const activeVideo = this.remoteVideo.srcObject ? this.remoteVideo : this.localVideo;
+
+      if (activeVideo && activeVideo.srcObject && 'pictureInPictureEnabled' in document) {
+        if (document.pictureInPictureElement) {
+          return; // Already in PiP mode
+        }
+
+        await activeVideo.requestPictureInPicture();
+        console.log('Entered Picture-in-Picture mode');
+        this.showNotification('Video minimized', 'info');
+      }
+    } catch (error) {
+      console.log('Picture-in-Picture not available or failed:', error.message);
+    }
+  }
+
+  async exitPictureInPicture() {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        console.log('Exited Picture-in-Picture mode');
+      }
+    } catch (error) {
+      console.error('Error exiting Picture-in-Picture:', error);
+    }
   }
 }
 

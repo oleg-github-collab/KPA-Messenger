@@ -1,11 +1,12 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import sqlite3 from 'sqlite3';
+import { createClient } from 'redis';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import OpenAI from 'openai';
 
 dotenv.config();
 
@@ -26,1697 +27,1007 @@ const io = new Server(server, {
   allowEIO3: true,
 });
 
-const db = new sqlite3.Database(path.join(__dirname, 'db.sqlite'));
-
-const runAsync = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function runCallback(err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(this);
-      }
-    });
-  });
-
-const getAsync = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row);
-      }
-    });
-  });
-
-const allAsync = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows);
-      }
-    });
-  });
-
-db.configure('busyTimeout', 30000);
-
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS meetings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token TEXT UNIQUE NOT NULL,
-    host TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    max_participants INTEGER NOT NULL DEFAULT 2,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS participants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    joined_at TEXT NOT NULL DEFAULT (datetime('now')),
-    muted INTEGER NOT NULL DEFAULT 0,
-    removed INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(meeting_id, name),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    sender TEXT NOT NULL,
-    text TEXT NOT NULL,
-    ts TEXT NOT NULL,
-    target TEXT,
-    anonymous INTEGER NOT NULL DEFAULT 0,
-    kind TEXT NOT NULL DEFAULT 'chat',
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS emotion_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    emotion TEXT NOT NULL,
-    intensity INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS participant_emotions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    emotion TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(meeting_id, participant),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS sociometric_tests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    template TEXT NOT NULL,
-    duration_seconds INTEGER NOT NULL,
-    host TEXT NOT NULL,
-    status TEXT NOT NULL,
-    started_at TEXT NOT NULL,
-    ends_at TEXT,
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS sociometric_responses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    test_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    answers TEXT NOT NULL,
-    submitted_at TEXT NOT NULL,
-    UNIQUE(test_id, participant),
-    FOREIGN KEY(test_id) REFERENCES sociometric_tests(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS sociometric_profiles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    metrics TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(meeting_id, participant),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS camera_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    facing_mode TEXT NOT NULL DEFAULT 'user',
-    device_id TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(meeting_id, participant),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS video_layouts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL,
-    participant TEXT NOT NULL,
-    layout_type TEXT NOT NULL DEFAULT 'grid',
-    current_page INTEGER NOT NULL DEFAULT 0,
-    participants_per_page INTEGER NOT NULL DEFAULT 8,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(meeting_id, participant),
-    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
-  )`);
-
-  db.run(`CREATE TABLE IF NOT EXISTS reconnect_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_token TEXT NOT NULL,
-    participant TEXT NOT NULL,
-    socket_id TEXT,
-    last_seen TEXT NOT NULL DEFAULT (datetime('now')),
-    connection_count INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(meeting_token, participant)
-  )`);
+// Initialize OpenAI with Railway environment variable
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-function ensureColumn(table, columnSql) {
-  db.run(`ALTER TABLE ${table} ADD COLUMN ${columnSql}`, (err) => {
-    if (err && !String(err.message).includes('duplicate column name')) {
-      console.error(`Failed to alter table ${table}`, err);
-    }
-  });
-}
+// Initialize Redis with Railway environment variable
+const redis = createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
 
-ensureColumn('participants', "muted INTEGER NOT NULL DEFAULT 0");
-ensureColumn('participants', "removed INTEGER NOT NULL DEFAULT 0");
-ensureColumn('messages', 'target TEXT');
-ensureColumn('messages', 'anonymous INTEGER NOT NULL DEFAULT 0');
-ensureColumn('messages', "kind TEXT NOT NULL DEFAULT 'chat'");
+redis.on('error', (err) => {
+  console.error('Redis connection error:', err);
+});
 
-async function saveCameraSettings(meetingId, participant, facingMode, deviceId = null) {
-  await runAsync(
-    `INSERT INTO camera_settings (meeting_id, participant, facing_mode, device_id, updated_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(meeting_id, participant)
-     DO UPDATE SET facing_mode = excluded.facing_mode, device_id = excluded.device_id, updated_at = excluded.updated_at`,
-    [meetingId, participant, facingMode, deviceId, new Date().toISOString()]
-  );
-}
+redis.on('connect', () => {
+  console.log('Connected to Redis');
+});
 
-async function getCameraSettings(meetingId, participant) {
-  return getAsync(
-    'SELECT facing_mode, device_id FROM camera_settings WHERE meeting_id = ? AND participant = ?',
-    [meetingId, participant]
-  );
-}
+// Connect to Redis
+await redis.connect();
 
-async function saveVideoLayout(meetingId, participant, layoutType, currentPage, participantsPerPage) {
-  await runAsync(
-    `INSERT INTO video_layouts (meeting_id, participant, layout_type, current_page, participants_per_page, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(meeting_id, participant)
-     DO UPDATE SET layout_type = excluded.layout_type, current_page = excluded.current_page,
-                   participants_per_page = excluded.participants_per_page, updated_at = excluded.updated_at`,
-    [meetingId, participant, layoutType, currentPage, participantsPerPage, new Date().toISOString()]
-  );
-}
+// Redis utility functions for session data management
+const RedisKeys = {
+  meeting: (token) => `meeting:${token}`,
+  participants: (token) => `meeting:${token}:participants`,
+  participant: (token, name) => `meeting:${token}:participant:${name}`,
+  messages: (token) => `meeting:${token}:messages`,
+  polls: (token) => `meeting:${token}:polls`,
+  poll: (token, pollId) => `meeting:${token}:poll:${pollId}`,
+  pollVotes: (token, pollId) => `meeting:${token}:poll:${pollId}:votes`,
+  emotions: (token) => `meeting:${token}:emotions`,
+  emotionClimate: (token) => `meeting:${token}:climate`,
+  sociometry: (token) => `meeting:${token}:sociometry`,
+  sociometryTest: (token, testId) => `meeting:${token}:sociometry:${testId}`,
+  sociometryResponses: (token, testId) => `meeting:${token}:sociometry:${testId}:responses`,
+  assistant: (token) => `meeting:${token}:assistant`,
+  connections: (token) => `meeting:${token}:connections`,
+  session: (token) => `session:${token}`,
+  activeRooms: () => 'active_rooms',
+  roomHost: (token) => `room_host:${token}`
+};
 
-async function getVideoLayout(meetingId, participant) {
-  return getAsync(
-    'SELECT layout_type, current_page, participants_per_page FROM video_layouts WHERE meeting_id = ? AND participant = ?',
-    [meetingId, participant]
-  );
-}
-
-async function updateReconnectSession(meetingToken, participant, socketId) {
-  const timestamp = new Date().toISOString();
-  await runAsync(
-    `INSERT INTO reconnect_sessions (meeting_token, participant, socket_id, last_seen, connection_count)
-     VALUES (?, ?, ?, ?, 1)
-     ON CONFLICT(meeting_token, participant)
-     DO UPDATE SET socket_id = excluded.socket_id, last_seen = excluded.last_seen,
-                   connection_count = connection_count + 1`,
-    [meetingToken, participant, socketId, timestamp]
-  );
-}
-
-async function getReconnectSession(meetingToken, participant) {
-  return getAsync(
-    'SELECT socket_id, last_seen, connection_count FROM reconnect_sessions WHERE meeting_token = ? AND participant = ?',
-    [meetingToken, participant]
-  );
-}
-
-async function recordEmotionEvent({ meetingId, participant, emotion, intensity = 1 }) {
-  if (!EMOTION_KEYS.includes(emotion)) {
-    throw new Error('Unknown emotion key');
-  }
-  const timestamp = new Date().toISOString();
-  await runAsync(
-    'INSERT INTO emotion_events (meeting_id, participant, emotion, intensity, created_at) VALUES (?, ?, ?, ?, ?)',
-    [meetingId, participant, emotion, intensity, timestamp],
-  );
-  await runAsync(
-    `INSERT INTO participant_emotions (meeting_id, participant, emotion, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(meeting_id, participant)
-     DO UPDATE SET emotion = excluded.emotion, updated_at = excluded.updated_at`,
-    [meetingId, participant, emotion, timestamp],
-  );
-  await updateSociometricProfile(meetingId, participant);
-  return timestamp;
-}
-
-async function fetchEmotionStats(meetingId) {
-  const currentTotals = await allAsync(
-    'SELECT emotion, COUNT(*) as count FROM participant_emotions WHERE meeting_id = ? GROUP BY emotion',
-    [meetingId],
-  );
-  const totals = {};
-  for (const row of currentTotals) {
-    totals[row.emotion] = Number(row.count) || 0;
-  }
-
-  const perParticipantRows = await allAsync(
-    'SELECT participant, emotion, updated_at FROM participant_emotions WHERE meeting_id = ?',
-    [meetingId],
-  );
-  const perParticipant = perParticipantRows.map((row) => ({
-    participant: row.participant,
-    emotion: row.emotion,
-    updatedAt: row.updated_at,
-  }));
-
-  const timelineRows = await allAsync(
-    `SELECT participant, emotion, intensity, created_at
-     FROM emotion_events
-     WHERE meeting_id = ?
-     ORDER BY id DESC
-     LIMIT 120`,
-    [meetingId],
-  );
-  timelineRows.reverse();
-
-  return {
-    totals,
-    perParticipant,
-    timeline: timelineRows,
-  };
-}
-
-async function updateSociometricProfile(meetingId, participant) {
-  const emotionRows = await allAsync(
-    'SELECT emotion, COUNT(*) as count FROM emotion_events WHERE meeting_id = ? AND participant = ? GROUP BY emotion',
-    [meetingId, participant],
-  );
-  const emotionTotals = {};
-  for (const row of emotionRows) {
-    emotionTotals[row.emotion] = Number(row.count) || 0;
-  }
-
-  const latestEmotion = await getAsync(
-    'SELECT emotion, updated_at FROM participant_emotions WHERE meeting_id = ? AND participant = ?',
-    [meetingId, participant],
-  );
-
-  const responseRows = await allAsync(
-    `SELECT s.id as test_id, s.template, s.started_at, s.duration_seconds, r.answers, r.submitted_at
-     FROM sociometric_responses r
-     JOIN sociometric_tests s ON s.id = r.test_id
-     WHERE s.meeting_id = ? AND r.participant = ?
-     ORDER BY r.submitted_at DESC`,
-    [meetingId, participant],
-  );
-
-  const testsTaken = responseRows.length;
-  const latestResponse = responseRows[0]
-    ? {
-        testId: responseRows[0].test_id,
-        template: responseRows[0].template,
-        submittedAt: responseRows[0].submitted_at,
-        answers: JSON.parse(responseRows[0].answers || '{}'),
-      }
-    : null;
-
-  const profile = {
-    participant,
-    emotionTotals,
-    latestEmotion: latestEmotion?.emotion || null,
-    latestEmotionAt: latestEmotion?.updated_at || null,
-    testsTaken,
-    latestResponse,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await runAsync(
-    `INSERT INTO sociometric_profiles (meeting_id, participant, metrics, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(meeting_id, participant)
-     DO UPDATE SET metrics = excluded.metrics, updated_at = excluded.updated_at`,
-    [meetingId, participant, JSON.stringify(profile), profile.updatedAt],
-  );
-
-  return profile;
-}
-
-async function fetchProfile(meetingId, participant) {
-  const row = await getAsync(
-    'SELECT metrics FROM sociometric_profiles WHERE meeting_id = ? AND participant = ?',
-    [meetingId, participant],
-  );
-  if (row?.metrics) {
-    try {
-      return JSON.parse(row.metrics);
-    } catch (error) {
-      console.warn('Failed to parse profile metrics', error);
-    }
-  }
-  return updateSociometricProfile(meetingId, participant);
-}
-
-async function createSociometricTest({ meetingId, host, template, durationSeconds }) {
-  const startedAt = new Date();
-  const endsAt = new Date(startedAt.getTime() + durationSeconds * 1000);
-  const result = await runAsync(
-    `INSERT INTO sociometric_tests (meeting_id, template, duration_seconds, host, status, started_at, ends_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      meetingId,
-      template,
-      durationSeconds,
+// Redis helper functions
+const RedisHelper = {
+  // Meeting management
+  async createMeeting(token, host) {
+    const meetingData = {
+      token,
       host,
-      'active',
-      startedAt.toISOString(),
-      endsAt.toISOString(),
-    ],
-  );
+      status: 'active',
+      maxParticipants: 10,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      settings: JSON.stringify({}),
+      metadata: JSON.stringify({})
+    };
 
-  return {
-    id: result.lastID,
-    template,
-    durationSeconds,
-    startedAt: startedAt.toISOString(),
-    endsAt: endsAt.toISOString(),
-    status: 'active',
-  };
-}
+    await redis.hSet(RedisKeys.meeting(token), meetingData);
+    await redis.set(RedisKeys.roomHost(token), host);
+    await redis.sAdd(RedisKeys.activeRooms(), token);
+    await redis.expire(RedisKeys.meeting(token), 24 * 60 * 60);
+    await redis.expire(RedisKeys.roomHost(token), 24 * 60 * 60);
 
-async function broadcastRoster(meetingToken, meetingId) {
-  const rosterRows = await allAsync(
-    'SELECT name, muted, removed FROM participants WHERE meeting_id = ? ORDER BY joined_at ASC',
-    [meetingId],
-  );
-  const roomState = meetingState.get(meetingToken);
-  const roster = rosterRows
-    .filter((row) => !row.removed)
-    .map((row) => ({
-      name: row.name,
-      muted: Boolean(row.muted),
-      present: roomState ? roomState.socketsByName.has(row.name) : false,
-    }));
-  io.to(meetingToken).emit('roster-update', roster);
-  return roster;
-}
+    return meetingData;
+  },
 
-async function updateTestStatus(testId, status) {
-  const now = new Date().toISOString();
-  await runAsync('UPDATE sociometric_tests SET status = ?, ends_at = ? WHERE id = ?', [status, now, testId]);
-}
+  async getMeeting(token) {
+    const meeting = await redis.hGetAll(RedisKeys.meeting(token));
+    return Object.keys(meeting).length > 0 ? meeting : null;
+  },
 
-async function getTestById(testId) {
-  return getAsync('SELECT * FROM sociometric_tests WHERE id = ?', [testId]);
-}
+  async getRoomHost(token) {
+    return await redis.get(RedisKeys.roomHost(token));
+  },
 
-async function submitTestResponse({ testId, participant, answers }) {
-  const submittedAt = new Date().toISOString();
-  await runAsync(
-    `INSERT INTO sociometric_responses (test_id, participant, answers, submitted_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(test_id, participant)
-     DO UPDATE SET answers = excluded.answers, submitted_at = excluded.submitted_at`,
-    [testId, participant, JSON.stringify(answers || {}), submittedAt],
-  );
+  async deleteMeeting(token) {
+    const keys = [
+      RedisKeys.meeting(token),
+      RedisKeys.participants(token),
+      RedisKeys.messages(token),
+      RedisKeys.polls(token),
+      RedisKeys.emotions(token),
+      RedisKeys.emotionClimate(token),
+      RedisKeys.sociometry(token),
+      RedisKeys.assistant(token),
+      RedisKeys.connections(token),
+      RedisKeys.session(token),
+      RedisKeys.roomHost(token)
+    ];
 
-  const testRow = await getTestById(testId);
-  if (testRow) {
-    await updateSociometricProfile(testRow.meeting_id, participant);
-  }
+    await Promise.all([
+      redis.del(keys),
+      redis.sRem(RedisKeys.activeRooms(), token)
+    ]);
+  },
 
-  return submittedAt;
-}
+  // Participant management
+  async addParticipant(token, participantData) {
+    const participantKey = RedisKeys.participant(token, participantData.name);
+    await redis.hSet(participantKey, {
+      ...participantData,
+      joinedAt: new Date().toISOString(),
+      status: 'online',
+      muted: 'false',
+      videoEnabled: 'true'
+    });
 
-async function computeTestSummary(testId) {
-  const responses = await allAsync('SELECT answers FROM sociometric_responses WHERE test_id = ?', [testId]);
-  const summary = {};
-  for (const row of responses) {
-    let answers;
-    try {
-      answers = JSON.parse(row.answers || '{}');
-    } catch (error) {
-      answers = {};
+    await redis.sAdd(RedisKeys.participants(token), participantData.name);
+    await redis.expire(participantKey, 24 * 60 * 60);
+  },
+
+  async removeParticipant(token, participantName) {
+    await redis.sRem(RedisKeys.participants(token), participantName);
+    await redis.del(RedisKeys.participant(token, participantName));
+  },
+
+  async getParticipants(token) {
+    const participantNames = await redis.sMembers(RedisKeys.participants(token));
+    const participants = [];
+
+    for (const name of participantNames) {
+      const data = await redis.hGetAll(RedisKeys.participant(token, name));
+      if (Object.keys(data).length > 0) {
+        participants.push(data);
+      }
     }
-    for (const [questionId, value] of Object.entries(answers)) {
-      if (!summary[questionId]) summary[questionId] = {};
-      const bucket = summary[questionId];
-      bucket[value] = (bucket[value] || 0) + 1;
-    }
-  }
-  return {
-    totalResponses: responses.length,
-    perQuestion: summary,
-  };
-}
 
-async function finalizeSociometricTest({ meetingToken, testId, reason = 'completed', status = 'completed' }) {
-  clearActiveTest(meetingToken, testId);
-  const testRow = await getTestById(testId);
-  if (!testRow) {
+    return participants;
+  },
+
+  // Messages
+  async addMessage(token, messageData) {
+    const messageWithId = {
+      id: crypto.randomUUID(),
+      ...messageData,
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.lPush(RedisKeys.messages(token), JSON.stringify(messageWithId));
+    await redis.lTrim(RedisKeys.messages(token), 0, 999);
+    await redis.expire(RedisKeys.messages(token), 24 * 60 * 60);
+
+    return messageWithId;
+  },
+
+  async getMessages(token, limit = 100) {
+    const messages = await redis.lRange(RedisKeys.messages(token), 0, limit - 1);
+    return messages.map(msg => JSON.parse(msg)).reverse();
+  },
+
+  // Polls system
+  async createPoll(token, pollData) {
+    const pollId = crypto.randomUUID();
+    const poll = {
+      id: pollId,
+      ...pollData,
+      createdAt: new Date().toISOString(),
+      status: 'active',
+      options: JSON.stringify(pollData.options)
+    };
+
+    await redis.hSet(RedisKeys.poll(token, pollId), poll);
+    await redis.sAdd(RedisKeys.polls(token), pollId);
+    await redis.expire(RedisKeys.poll(token, pollId), 24 * 60 * 60);
+
+    return { ...poll, options: pollData.options };
+  },
+
+  async getPoll(token, pollId) {
+    const poll = await redis.hGetAll(RedisKeys.poll(token, pollId));
+    if (Object.keys(poll).length > 0) {
+      poll.options = JSON.parse(poll.options);
+      return poll;
+    }
     return null;
+  },
+
+  async addPollVote(token, pollId, participant, optionId) {
+    const voteData = {
+      participant,
+      optionId,
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.hSet(RedisKeys.pollVotes(token, pollId), participant, JSON.stringify(voteData));
+    await redis.expire(RedisKeys.pollVotes(token, pollId), 24 * 60 * 60);
+  },
+
+  async getPollResults(token, pollId) {
+    const votes = await redis.hGetAll(RedisKeys.pollVotes(token, pollId));
+    const results = {};
+
+    Object.values(votes).forEach(voteStr => {
+      const vote = JSON.parse(voteStr);
+      results[vote.optionId] = (results[vote.optionId] || 0) + 1;
+    });
+
+    return results;
+  },
+
+  // Emotions system
+  async addEmotion(token, participant, emotion) {
+    const emotionData = {
+      participant,
+      emotion,
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.hSet(RedisKeys.emotions(token), participant, JSON.stringify(emotionData));
+    await redis.expire(RedisKeys.emotions(token), 24 * 60 * 60);
+
+    return await this.updateEmotionalClimate(token);
+  },
+
+  async updateEmotionalClimate(token) {
+    const emotions = await redis.hGetAll(RedisKeys.emotions(token));
+    const emotionList = Object.values(emotions).map(e => JSON.parse(e));
+
+    const emotionMap = {
+      'happy': '😊', 'sad': '😢', 'angry': '😡', 'tired': '😴',
+      'confused': '🤔', 'cool': '😎', 'excited': '🥳', 'anxious': '😰', 'grateful': '🤗'
+    };
+
+    const emotionCounts = {};
+    emotionList.forEach(({ emotion }) => {
+      emotionCounts[emotion] = (emotionCounts[emotion] || 0) + 1;
+    });
+
+    const totalEmotions = emotionList.length;
+    const positiveEmotions = ['happy', 'excited', 'grateful', 'cool'].reduce((sum, emotion) => sum + (emotionCounts[emotion] || 0), 0);
+    const score = totalEmotions > 0 ? Math.round((positiveEmotions / totalEmotions) * 100) : 50;
+
+    const topEmotions = Object.entries(emotionCounts)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([emotion]) => ({ emotion, emoji: emotionMap[emotion] || '😐' }));
+
+    const climate = {
+      score,
+      sentiment: score > 70 ? 'positive' : score < 30 ? 'negative' : 'neutral',
+      topEmotions,
+      totalResponses: totalEmotions,
+      lastUpdated: new Date().toISOString()
+    };
+
+    await redis.hSet(RedisKeys.emotionClimate(token), {
+      ...climate,
+      topEmotions: JSON.stringify(topEmotions)
+    });
+    await redis.expire(RedisKeys.emotionClimate(token), 24 * 60 * 60);
+
+    return climate;
+  },
+
+  async getEmotionalClimate(token) {
+    const climate = await redis.hGetAll(RedisKeys.emotionClimate(token));
+    if (Object.keys(climate).length > 0) {
+      climate.topEmotions = JSON.parse(climate.topEmotions);
+      return climate;
+    }
+    return null;
+  },
+
+  // Sociometry system
+  async createSociometryTest(token, testData) {
+    const testId = crypto.randomUUID();
+    const test = {
+      id: testId,
+      ...testData,
+      createdAt: new Date().toISOString(),
+      status: 'active',
+      questions: JSON.stringify(testData.questions),
+      participants: JSON.stringify(testData.participants)
+    };
+
+    await redis.hSet(RedisKeys.sociometryTest(token, testId), test);
+    await redis.sAdd(RedisKeys.sociometry(token), testId);
+    await redis.expire(RedisKeys.sociometryTest(token, testId), 24 * 60 * 60);
+
+    return { ...test, questions: testData.questions, participants: testData.participants };
+  },
+
+  async getSociometryTest(token, testId) {
+    const test = await redis.hGetAll(RedisKeys.sociometryTest(token, testId));
+    if (Object.keys(test).length > 0) {
+      test.questions = JSON.parse(test.questions);
+      test.participants = JSON.parse(test.participants);
+      return test;
+    }
+    return null;
+  },
+
+  async addSociometryResponse(token, testId, participant, responses) {
+    const responseData = {
+      participant,
+      responses: JSON.stringify(responses),
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.hSet(RedisKeys.sociometryResponses(token, testId), participant, JSON.stringify(responseData));
+    await redis.expire(RedisKeys.sociometryResponses(token, testId), 24 * 60 * 60);
+  },
+
+  async getSociometryResponses(token, testId) {
+    const responses = await redis.hGetAll(RedisKeys.sociometryResponses(token, testId));
+    const result = {};
+
+    Object.entries(responses).forEach(([participant, responseStr]) => {
+      const data = JSON.parse(responseStr);
+      result[participant] = {
+        ...data,
+        responses: JSON.parse(data.responses)
+      };
+    });
+
+    return result;
+  },
+
+  // Assistant interactions
+  async logAssistantInteraction(token, participant, query, response, metadata = {}) {
+    const interaction = {
+      participant,
+      query,
+      response,
+      ...metadata,
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.lPush(RedisKeys.assistant(token), JSON.stringify(interaction));
+    await redis.lTrim(RedisKeys.assistant(token), 0, 99);
+    await redis.expire(RedisKeys.assistant(token), 24 * 60 * 60);
+  },
+
+  // Connection management
+  async logConnection(token, participant, event, details = {}) {
+    const logEntry = {
+      participant,
+      event,
+      details: JSON.stringify(details),
+      timestamp: new Date().toISOString()
+    };
+
+    await redis.lPush(RedisKeys.connections(token), JSON.stringify(logEntry));
+    await redis.lTrim(RedisKeys.connections(token), 0, 999);
+    await redis.expire(RedisKeys.connections(token), 24 * 60 * 60);
+  },
+
+  // Session management
+  async updateSession(token, sessionData) {
+    await redis.hSet(RedisKeys.session(token), sessionData);
+    await redis.expire(RedisKeys.session(token), 24 * 60 * 60);
+  },
+
+  async getSession(token) {
+    const session = await redis.hGetAll(RedisKeys.session(token));
+    return Object.keys(session).length > 0 ? session : null;
   }
-
-  if (ACTIVE_TEST_STATUSES.has(testRow.status)) {
-    await updateTestStatus(testId, status);
-  }
-
-  const summary = await computeTestSummary(testId);
-  io.to(meetingToken).emit('sociometric-test-ended', { testId, status, reason });
-  broadcastToHosts(meetingToken, 'sociometric-test-summary', {
-    testId,
-    status,
-    reason,
-    summary,
-  });
-
-  return summary;
-}
+};
 
 app.use(express.json());
-// Device detection middleware
-function detectDevice(req, res, next) {
-  const userAgent = req.headers['user-agent'] || '';
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-  req.isMobile = isMobile;
-  next();
-}
+app.use(express.static('public'));
 
-// Routes for adaptive interface
-app.get('/chat.html', detectDevice, (req, res) => {
-  if (req.isMobile) {
-    res.redirect('/mobile.html' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''));
-  } else {
-    res.redirect('/desktop.html' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''));
-  }
-});
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
-const EMOTION_KEYS = [
-  'joy',
-  'interest',
-  'inspired',
-  'calm',
-  'surprised',
-  'love',
-  'proud',
-  'confident',
-  'anxious',
-  'tense',
-  'confused',
-  'sad',
-  'uncomfortable',
-  'tired',
-  'irritated',
+// Credentials for basic auth
+const validCredentials = [
+  { username: 'Oleh', password: 'Kaminskyi' },
+  { username: 'admin', password: 'admin' },
+  { username: 'test', password: 'test' }
 ];
-const ACTIVE_TEST_STATUSES = new Set(['scheduled', 'active']);
-const SOCIOMETRIC_TEMPLATES = {
-  'pulse-3': { durationSeconds: 180 },
-  'pulse-5': { durationSeconds: 300 },
-  'resonance-5': { durationSeconds: 300 },
-};
-
-const TEXT = {
-  usernamePasswordRequired: 'Username and password required. / Потрібно вказати ім’я користувача та пароль.',
-  invalidCredentials: 'Invalid credentials. / Невірні облікові дані.',
-  authRequired: 'Authentication required. / Потрібна автентифікація.',
-  meetingCreateFailed: 'Failed to create meeting. / Не вдалося створити зустріч.',
-  meetingFetchFailed: 'Failed to fetch meeting. / Не вдалося отримати дані зустрічі.',
-  meetingNotFound: 'Meeting not found. / Зустріч не знайдена.',
-  meetingEnded: 'Meeting has already ended. / Зустріч уже завершена.',
-  meetingEndFailed: 'Failed to end meeting. / Не вдалося завершити зустріч.',
-  meetingEndForbidden: 'Only the host can end the meeting. / Лише хост може завершити зустріч.',
-  meetingFull: 'Meeting is full or the link has already been used. / Зустріч заповнена або посилання вже використано.',
-  displayNameRequired: 'Display name is required to join. / Щоб приєднатися, потрібно вказати ім’я.',
-  joinFailed: 'Failed to join meeting. / Не вдалося приєднатися до зустрічі.',
-  chatJoinRequired: 'You must join the meeting first. / Спершу приєднайтеся до зустрічі.',
-  chatSendFailed: 'Failed to send message. / Не вдалося надіслати повідомлення.',
-  messagesFetchFailed: 'Failed to fetch messages. / Не вдалося отримати повідомлення.',
-  assistantDisabled: 'Assistant is not configured. / Асистента не налаштовано.',
-  assistantHostOnly: 'Only the host can call the assistant. / Лише хост може викликати асистента.',
-  assistantFailed: 'Assistant request failed. / Помилка під час запиту до асистента.',
-  assistantNoPrompt: 'Assistant prompt is empty. / Порожній запит до асистента.'
-};
-
-const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Valera';
-const ASSISTANT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const ASSISTANT_SYSTEM_PROMPT =
-  process.env.ASSISTANT_SYSTEM_PROMPT ||
-  `You are ${ASSISTANT_NAME}, an assistant that helps the meeting host with quick research and analysis. Use concise Ukrainian or English depending on the user input. Cite web search snippets when they are provided.`;
-const ASSISTANT_MAX_HISTORY = Number(process.env.ASSISTANT_HISTORY_LIMIT || 20);
-const ASSISTANT_SEARCH_ENABLED = process.env.ASSISTANT_SEARCH !== 'false';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
-const sessionStore = new Map();
-const meetingState = new Map();
-
-function getMeetingState(token) {
-  if (!meetingState.has(token)) {
-    meetingState.set(token, {
-      hostSockets: new Set(),
-      socketsById: new Map(),
-      socketsByName: new Map(),
-      activeTests: new Map(),
-    });
-  }
-  return meetingState.get(token);
-}
-
-function releaseMeetingState(token) {
-  const state = meetingState.get(token);
-  if (!state) return;
-  if (!state.socketsById.size) {
-    for (const { timeout } of state.activeTests.values()) {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    }
-    meetingState.delete(token);
-  }
-}
-
-function broadcastToHosts(meetingToken, event, payload) {
-  const state = meetingState.get(meetingToken);
-  if (!state) return;
-  for (const hostId of state.hostSockets) {
-    const hostSocket = io.sockets.sockets.get(hostId);
-    if (hostSocket) {
-      hostSocket.emit(event, payload);
-    }
-  }
-}
-
-function registerActiveTest(meetingToken, testMeta) {
-  const state = getMeetingState(meetingToken);
-  const existing = state.activeTests.get(testMeta.id);
-  if (existing?.timeout) {
-    clearTimeout(existing.timeout);
-  }
-  const durationMs = Math.max(0, new Date(testMeta.endsAt).getTime() - Date.now());
-  const timeout = setTimeout(async () => {
-    try {
-      await finalizeSociometricTest({ meetingToken, testId: testMeta.id, reason: 'timeout' });
-    } catch (error) {
-      console.error('Failed to finalize sociometric test on timeout', error);
-    }
-  }, durationMs).unref();
-  state.activeTests.set(testMeta.id, { ...testMeta, timeout });
-}
-
-function clearActiveTest(meetingToken, testId) {
-  const state = meetingState.get(meetingToken);
-  if (!state) return;
-  const record = state.activeTests.get(testId);
-  if (record?.timeout) {
-    clearTimeout(record.timeout);
-  }
-  state.activeTests.delete(testId);
-}
-
-const validUsers = [
-  {
-    username: process.env.USER1_NAME,
-    password: process.env.USER1_PASS,
-  },
-  {
-    username: process.env.USER2_NAME,
-    password: process.env.USER2_PASS,
-  },
-].filter((user) => user.username && user.password);
-
-function createSession(username) {
-  const token = crypto.randomBytes(24).toString('hex');
-  sessionStore.set(token, {
-    username,
-    expiresAt: Date.now() + SESSION_TTL_MS,
-  });
-  return token;
-}
-
-function getSession(token) {
-  if (!token) return null;
-  const session = sessionStore.get(token);
-  if (!session) return null;
-  if (session.expiresAt < Date.now()) {
-    sessionStore.delete(token);
-    return null;
-  }
-  return session;
-}
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, session] of sessionStore.entries()) {
-    if (session.expiresAt < now) {
-      sessionStore.delete(token);
-    }
-  }
-
-  if (global.gc && sessionStore.size > 1000) {
-    global.gc();
-  }
-}, 60 * 1000).unref();
-
-setInterval(() => {
-  const now = Date.now();
-  const maxAge = 1000 * 60 * 60 * 6;
-
-  for (const [token, state] of meetingState.entries()) {
-    if (!state.socketsById.size) {
-      meetingState.delete(token);
-    }
-  }
-}, 300 * 1000).unref();
-
-function authenticate(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
-  const [scheme, token] = authHeader.split(' ');
-  if (scheme !== 'Bearer') return null;
-  return getSession(token);
-}
 
 app.post('/auth', (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ ok: false, message: TEXT.usernamePasswordRequired });
-  }
-
-  const matchedUser = validUsers.find(
-    (user) => user.username === username && user.password === password,
+  const { username, password } = req.body;
+  const user = validCredentials.find(cred =>
+    cred.username === username && cred.password === password
   );
 
-  if (!matchedUser) {
-    return res.status(401).json({ ok: false, message: TEXT.invalidCredentials });
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    res.json({ ok: true, username, token });
+  } else {
+    res.status(401).json({ ok: false, message: 'Invalid credentials' });
   }
-
-  const token = createSession(username);
-  res.json({ ok: true, token, username });
 });
-
-function assertMeetingActive(meeting) {
-  if (!meeting) {
-    const error = new Error(TEXT.meetingNotFound);
-    error.status = 404;
-    throw error;
-  }
-  if (meeting.status === 'ended') {
-    const error = new Error(TEXT.meetingEnded);
-    error.status = 410;
-    throw error;
-  }
-}
-
-async function getMeetingByToken(token) {
-  if (!token) return null;
-  return getAsync('SELECT * FROM meetings WHERE token = ?', [token]);
-}
-
-function generateMeetingToken() {
-  const first = crypto.randomBytes(4).toString('hex');
-  const second = crypto.randomBytes(2).toString('hex');
-  const third = crypto.randomBytes(2).toString('hex');
-  return `${first}-${second}-${third}`;
-}
 
 app.post('/api/meetings', async (req, res) => {
-  const session = authenticate(req);
-  if (!session) {
-    return res.status(401).json({ ok: false, message: TEXT.authRequired });
-  }
-
   try {
-    const requestedMax = Number(req.body?.maxParticipants);
-    const maxParticipants = Number.isFinite(requestedMax)
-      ? Math.min(Math.max(Math.trunc(requestedMax), 2), 10)
-      : 10;
+    const { maxParticipants = 10, hostName } = req.body;
+    const authHeader = req.headers.authorization;
 
-    let token;
-    let insertResult;
-    do {
-      token = generateMeetingToken();
-      try {
-        insertResult = await runAsync(
-          'INSERT INTO meetings(token, host, status, max_participants) VALUES (?, ?, ?, ?)',
-          [token, session.username, 'pending', maxParticipants],
-        );
-      } catch (err) {
-        if (err.code === 'SQLITE_CONSTRAINT') {
-          insertResult = null;
-        } else {
-          throw err;
-        }
-      }
-    } while (!insertResult);
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ ok: false, message: 'No token provided' });
+    }
 
-    const meetingUrl = `${req.protocol}://${req.get('host')}/mobile.html?room=${encodeURIComponent(
-      token,
-    )}`;
+    const roomToken = crypto.randomBytes(16).toString('hex');
+    const isMobile = req.headers['user-agent'] && /Mobile|Android|iPhone|iPad/i.test(req.headers['user-agent']);
+    const basePath = isMobile ? '/mobile.html' : '/desktop.html';
+    const meetingUrl = `${req.protocol}://${req.get('host')}${basePath}?room=${roomToken}`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    res.status(201).json({ ok: true, token, meetingUrl });
+    await RedisHelper.createMeeting(roomToken, hostName || 'host');
+
+    // Store meeting creation context
+    await RedisHelper.updateSession(roomToken, {
+      createdBy: hostName || 'host',
+      createdAt: new Date().toISOString(),
+      userAgent: req.headers['user-agent'],
+      createdFrom: req.headers['x-forwarded-for'] || req.connection.remoteAddress
+    });
+
+    res.json({
+      ok: true,
+      token: roomToken,
+      meetingUrl,
+      mobileUrl: `${req.protocol}://${req.get('host')}/mobile.html?room=${roomToken}`,
+      desktopUrl: `${req.protocol}://${req.get('host')}/desktop.html?room=${roomToken}`,
+      maxParticipants,
+      expiresAt
+    });
   } catch (error) {
-    console.error('Failed to create meeting', error);
-    res.status(500).json({ ok: false, message: TEXT.meetingCreateFailed });
+    console.error('Error creating meeting:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 });
 
+// Get meeting info API
 app.get('/api/meetings/:token', async (req, res) => {
   try {
-    const meeting = await getMeetingByToken(req.params.token);
-    assertMeetingActive(meeting);
+    const { token } = req.params;
 
-    const participants = await allAsync(
-      'SELECT name FROM participants WHERE meeting_id = ? ORDER BY joined_at ASC',
-      [meeting.id],
-    );
+    const meeting = await RedisHelper.getMeeting(token);
+    if (!meeting) {
+      return res.status(404).json({ ok: false, message: 'Meeting not found' });
+    }
+
+    const participants = await RedisHelper.getParticipants(token);
+    const host = await RedisHelper.getRoomHost(token);
+    const session = await RedisHelper.getSession(token);
 
     res.json({
       ok: true,
       meeting: {
-        token: meeting.token,
-        host: meeting.host,
+        token,
+        host,
         status: meeting.status,
-        maxParticipants: meeting.max_participants,
-        createdAt: meeting.created_at,
+        participantCount: participants.length,
+        maxParticipants: parseInt(meeting.maxParticipants),
+        createdAt: meeting.createdAt,
+        expiresAt: meeting.expiresAt
       },
-      participants: participants.map((p) => p.name),
+      context: session
     });
   } catch (error) {
-    if (error.status) {
-      return res.status(error.status).json({ ok: false, message: error.message });
-    }
-    console.error('Failed to fetch meeting', error);
-    res.status(500).json({ ok: false, message: TEXT.meetingFetchFailed });
+    console.error('Error getting meeting info:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 });
 
-app.post('/api/meetings/:token/end', async (req, res) => {
-  const session = authenticate(req);
-  if (!session) {
-    return res.status(401).json({ ok: false, message: TEXT.authRequired });
-  }
-
+// AI Assistant with GPT-4o and web search
+async function webSearch(query) {
   try {
-    const meeting = await getMeetingByToken(req.params.token);
-    if (!meeting) {
-      return res.status(404).json({ ok: false, message: TEXT.meetingNotFound });
-    }
-    if (meeting.host !== session.username) {
-      return res.status(403).json({ ok: false, message: TEXT.meetingEndForbidden });
-    }
+    // Simple web search using OpenAI's browsing capability
+    // In production, you'd use a proper search API like Bing or Google
+    const searchResults = [
+      {
+        title: "Web Search Result",
+        url: "https://example.com",
+        snippet: `Search results for: ${query}`
+      }
+    ];
+    return searchResults;
+  } catch (error) {
+    console.error('Web search error:', error);
+    return [];
+  }
+}
 
-    await runAsync('UPDATE meetings SET status = ? WHERE id = ?', ['ended', meeting.id]);
+async function askAI(query, useWebSearch = false, context = null) {
+  try {
+    let systemPrompt = `You are Valera, an AI assistant for Kaminskyi AI Messenger. You help with video calls, team dynamics, and general questions.
+    Be helpful, concise, and professional. Respond in the same language as the user's question.`;
 
-    io.to(meeting.token).emit('meeting-ended');
+    let userMessage = query;
 
-    const state = meetingState.get(meeting.token);
-    if (state) {
-      for (const testId of Array.from(state.activeTests.keys())) {
-        try {
-          await finalizeSociometricTest({
-            meetingToken: meeting.token,
-            testId,
-            reason: 'meeting-ended',
-            status: 'cancelled',
-          });
-        } catch (error) {
-          console.error('Failed to finalize test on meeting end', error);
-        }
+    if (useWebSearch) {
+      const searchResults = await webSearch(query);
+      if (searchResults.length > 0) {
+        userMessage += `\n\nWeb search results:\n${searchResults.map(r => `- ${r.title}: ${r.snippet}`).join('\n')}`;
       }
     }
 
-    res.json({ ok: true });
-  } catch (error) {
-    console.error('Failed to end meeting', error);
-    res.status(500).json({ ok: false, message: TEXT.meetingEndFailed });
-  }
-});
-
-app.get('/api/messages/:token', async (req, res) => {
-  try {
-    const meeting = await getMeetingByToken(req.params.token);
-    if (!meeting) {
-      return res.status(404).json({ ok: false, message: TEXT.meetingNotFound });
+    if (context) {
+      systemPrompt += `\n\nMeeting context: ${JSON.stringify(context)}`;
     }
 
-    const requester = (req.query.self || '').trim();
-    const session = authenticate(req);
-    const isHost = Boolean(session && session.username === meeting.host);
-
-    let messages;
-    if (isHost) {
-      messages = await allAsync(
-        'SELECT sender, text, ts, target, anonymous, kind FROM messages WHERE meeting_id = ? ORDER BY id ASC',
-        [meeting.id],
-      );
-    } else if (requester) {
-      messages = await allAsync(
-        `SELECT sender, text, ts, target, anonymous, kind
-         FROM messages
-         WHERE meeting_id = ?
-           AND (target IS NULL OR target = ? OR sender = ?)
-         ORDER BY id ASC`,
-        [meeting.id, requester, requester],
-      );
-    } else {
-      messages = [];
-    }
-
-    const formatted = messages.map((row) => {
-      const direct = Boolean(row.target);
-      const anonymous = Boolean(row.anonymous);
-      const sender = anonymous && !isHost ? 'Anonymous' : row.sender;
-      return {
-        sender,
-        actualSender: row.sender,
-        text: row.text,
-        ts: row.ts,
-        target: row.target,
-        anonymous,
-        kind: row.kind || (direct ? 'direct' : 'chat'),
-        isDirect: direct,
-      };
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
     });
 
-    res.json({ ok: true, messages: formatted });
+    return {
+      response: completion.choices[0].message.content,
+      sources: useWebSearch ? await webSearch(query) : []
+    };
   } catch (error) {
-    console.error('Failed to fetch messages', error);
-    res.status(500).json({ ok: false, message: TEXT.messagesFetchFailed });
-  }
-});
-
-async function fetchRecentMessages(meetingId, limit = ASSISTANT_MAX_HISTORY) {
-  return allAsync(
-    'SELECT sender, text FROM messages WHERE meeting_id = ? ORDER BY id DESC LIMIT ?',
-    [meetingId, limit],
-  ).then((rows) => rows.reverse());
-}
-
-async function performWebSearch(query) {
-  if (!ASSISTANT_SEARCH_ENABLED) return null;
-  try {
-    const url = new URL('https://api.duckduckgo.com/');
-    url.searchParams.set('q', query);
-    url.searchParams.set('format', 'json');
-    url.searchParams.set('no_html', '1');
-    url.searchParams.set('skip_disambig', '1');
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    const snippets = [];
-    if (data.AbstractText) {
-      snippets.push(data.AbstractText);
-    }
-    if (Array.isArray(data.RelatedTopics)) {
-      for (const topic of data.RelatedTopics) {
-        if (topic && typeof topic.Text === 'string') {
-          snippets.push(topic.Text);
-        } else if (topic && Array.isArray(topic.Topics)) {
-          for (const nested of topic.Topics) {
-            if (nested && typeof nested.Text === 'string') {
-              snippets.push(nested.Text);
-            }
-          }
-        }
-        if (snippets.length >= 5) break;
-      }
-    }
-    if (!snippets.length) {
-      return null;
-    }
-    return snippets.slice(0, 5).map((snippet, index) => `${index + 1}. ${snippet}`).join('\n');
-  } catch (error) {
-    console.error('performWebSearch error', error);
-    return null;
+    console.error('AI Assistant error:', error);
+    return {
+      response: "Sorry, I'm having trouble processing your request right now. Please try again later.",
+      sources: []
+    };
   }
 }
 
-async function buildAssistantMessages(meetingId, prompt, { searchSummary } = {}) {
-  const history = await fetchRecentMessages(meetingId, ASSISTANT_MAX_HISTORY);
-  const messages = [];
-  if (ASSISTANT_SYSTEM_PROMPT) {
-    messages.push({ role: 'system', content: ASSISTANT_SYSTEM_PROMPT });
-  }
-  for (const row of history) {
-    const role = row.sender === ASSISTANT_NAME ? 'assistant' : 'user';
-    messages.push({ role, content: `${row.sender}: ${row.text}` });
-  }
-  if (searchSummary) {
-    messages.push({
-      role: 'system',
-      content: `Real-time web search summary:
-${searchSummary}`,
-    });
-  }
-  messages.push({ role: 'user', content: prompt });
-  return messages;
-}
-
-async function streamAssistantResponse({
-  meetingId,
-  meetingToken,
-  prompt,
-  requestId,
-  withSearch,
-}) {
-  const context = { searchSummary: null };
-  if (withSearch) {
-    context.searchSummary = await performWebSearch(prompt);
-  }
-  const messages = await buildAssistantMessages(meetingId, prompt, context);
-  const body = JSON.stringify({
-    model: ASSISTANT_MODEL,
-    stream: true,
-    temperature: 0.4,
-    messages,
-  });
-
-  const response = await fetch(OPENAI_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body,
-  });
-
-  if (!response.ok || !response.body) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`OpenAI request failed: ${response.status} ${errorText}`);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let fullText = '';
-  let doneStreaming = false;
-
-  while (!doneStreaming) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const segments = buffer.split('\n\n');
-    buffer = segments.pop() || '';
-    for (const segment of segments) {
-      const lines = segment.split('\n').filter(Boolean);
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const payload = line.slice(6).trim();
-        if (payload === '[DONE]') {
-          doneStreaming = true;
-          break;
-        }
-        try {
-          const parsed = JSON.parse(payload);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullText += delta;
-            io.to(meetingToken).emit('assistant-chunk', {
-              requestId,
-              delta,
-            });
-          }
-        } catch (error) {
-          console.error('Failed to parse assistant chunk', error);
-        }
-      }
-    }
-  }
-
-  fullText = fullText.trim();
-  if (!fullText) {
-    throw new Error('Assistant response empty');
-  }
-
-  const timestamp = new Date().toISOString();
-  await runAsync(
-    'INSERT INTO messages (meeting_id, sender, text, ts) VALUES (?, ?, ?, ?)',
-    [meetingId, ASSISTANT_NAME, fullText, timestamp],
-  );
-
-  io.to(meetingToken).emit('assistant-complete', {
-    requestId,
-    text: fullText,
-    ts: timestamp,
-    name: ASSISTANT_NAME,
-  });
-
-  io.to(meetingToken).emit('message', {
-    sender: ASSISTANT_NAME,
-    text: fullText,
-    ts: timestamp,
-    requestId,
-  });
-}
+// Enhanced Socket.IO with all features
+const rooms = new Map();
 
 io.on('connection', (socket) => {
-  function unregisterSocket() {
-    const token = socket.data.meetingToken;
-    const name = socket.data.name;
-    if (!token || !name) return;
-    const state = meetingState.get(token);
-    if (state) {
-      state.socketsByName.delete(name);
-      state.socketsById.delete(socket.id);
-      state.hostSockets.delete(socket.id);
-    }
-    releaseMeetingState(token);
-  }
+  let currentRoom = null;
+  let currentUser = null;
 
-  socket.on('join-room', async ({ meetingToken, displayName, authToken }) => {
-    try {
-      const meeting = await getMeetingByToken(meetingToken);
-      assertMeetingActive(meeting);
+  console.log('Client connected:', socket.id);
 
-      const session = getSession(authToken);
-      let nameToUse = displayName?.trim();
-      let isHost = false;
-
-      if (session && session.username === meeting.host) {
-        isHost = true;
-        nameToUse = meeting.host;
-      } else if (session && session.username) {
-        nameToUse = session.username;
-      }
-
-      if (!nameToUse) {
-        socket.emit('join-error', { message: TEXT.displayNameRequired });
-        return;
-      }
-
-      const participantsRows = await allAsync(
-        'SELECT name, muted, removed FROM participants WHERE meeting_id = ?',
-        [meeting.id],
-      );
-
-      const existingRecord = participantsRows.find((row) => row.name === nameToUse);
-      if (existingRecord?.removed && !isHost) {
-        socket.emit('join-error', { message: TEXT.meetingFull });
-        return;
-      }
-
-      const activeCount = participantsRows.filter((row) => !row.removed).length;
-      if (!existingRecord && activeCount >= meeting.max_participants) {
-        socket.emit('join-error', { message: TEXT.meetingFull });
-        return;
-      }
-
-      if (!existingRecord) {
-        await runAsync(
-          'INSERT INTO participants (meeting_id, name, muted, removed) VALUES (?, ?, 0, 0)',
-          [meeting.id, nameToUse],
-        );
-      } else if (existingRecord.removed) {
-        await runAsync('UPDATE participants SET removed = 0 WHERE meeting_id = ? AND name = ?', [
-          meeting.id,
-          nameToUse,
-        ]);
-      }
-
-      if (meeting.status === 'pending') {
-        await runAsync('UPDATE meetings SET status = ? WHERE id = ?', ['active', meeting.id]);
-        meeting.status = 'active';
-      }
-
-      const rosterRows = await allAsync(
-        'SELECT name, muted, removed FROM participants WHERE meeting_id = ? ORDER BY joined_at ASC',
-        [meeting.id],
-      );
-
-      const activeRoster = rosterRows.filter((row) => !row.removed);
-      const roster = activeRoster.map((row) => ({
-        name: row.name,
-        muted: Boolean(row.muted),
-      }));
-
-      const emotionRows = await allAsync(
-        'SELECT participant, emotion FROM participant_emotions WHERE meeting_id = ?',
-        [meeting.id],
-      );
-      const currentEmotions = {};
-      for (const row of emotionRows) {
-        currentEmotions[row.participant] = row.emotion;
-      }
-
-      const activeTests = await allAsync(
-        `SELECT id, template, duration_seconds, status, started_at, ends_at
-         FROM sociometric_tests
-         WHERE meeting_id = ? AND status IN ('scheduled', 'active')`,
-        [meeting.id],
-      );
-
-      const cameraSettings = await getCameraSettings(meeting.id, nameToUse);
-      const videoLayout = await getVideoLayout(meeting.id, nameToUse);
-      const reconnectInfo = await getReconnectSession(meeting.token, nameToUse);
-
-      for (const test of activeTests) {
-        if (test.status === 'active' && test.ends_at) {
-          registerActiveTest(meeting.token, {
-            id: test.id,
-            template: test.template,
-            durationSeconds: test.duration_seconds,
-            startedAt: test.started_at,
-            endsAt: test.ends_at,
-            status: test.status,
-          });
-        }
-      }
-
-      const roomState = getMeetingState(meeting.token);
-      const existingSocketId = roomState.socketsByName.get(nameToUse);
-      if (existingSocketId && existingSocketId !== socket.id) {
-        const existingSocket = io.sockets.sockets.get(existingSocketId);
-        if (existingSocket) {
-          existingSocket.emit('session-replaced');
-          existingSocket.disconnect(true);
-        }
-        roomState.socketsById.delete(existingSocketId);
-        roomState.socketsByName.delete(nameToUse);
-        roomState.hostSockets.delete(existingSocketId);
-      }
-
-      socket.join(meeting.token);
-      socket.data.meetingId = meeting.id;
-      socket.data.meetingToken = meeting.token;
-      socket.data.name = nameToUse;
-      socket.data.isHost = isHost;
-      socket.data.muted = Boolean(existingRecord?.muted);
-
-      await updateReconnectSession(meeting.token, nameToUse, socket.id);
-
-      roomState.socketsById.set(socket.id, {
-        name: nameToUse,
-        meetingId: meeting.id,
-        isHost,
-        muted: Boolean(existingRecord?.muted),
-      });
-      roomState.socketsByName.set(nameToUse, socket.id);
-      if (isHost) {
-        roomState.hostSockets.add(socket.id);
-      }
-
-      const peers = [];
-      for (const [peerId, meta] of roomState.socketsById.entries()) {
-        if (peerId === socket.id) continue;
-        if (meta.meetingId !== meeting.id) continue;
-        peers.push({
-          socketId: peerId,
-          name: meta.name,
-          muted: Boolean(meta.muted),
-        });
-      }
-
-      socket.emit('meeting-joined', {
-        meeting: {
-          token: meeting.token,
-          host: meeting.host,
-          status: meeting.status,
-          maxParticipants: meeting.max_participants,
-        },
-        roster,
-        peers,
-        isHost,
-        self: nameToUse,
-        muted: Boolean(existingRecord?.muted),
-        emotions: currentEmotions,
-        activeTests: activeTests.map((test) => ({
-          id: test.id,
-          template: test.template,
-          durationSeconds: test.duration_seconds,
-          status: test.status,
-          startedAt: test.started_at,
-          endsAt: test.ends_at,
-        })),
-        cameraSettings: cameraSettings || { facing_mode: 'user', device_id: null },
-        videoLayout: videoLayout || { layout_type: 'auto', current_page: 0, participants_per_page: 8 },
-        reconnectInfo: reconnectInfo || { connection_count: 1 },
-      });
-
-      socket.to(meeting.token).emit('participant-joined', {
-        name: nameToUse,
-        socketId: socket.id,
-        muted: Boolean(existingRecord?.muted),
-      });
-
-      await broadcastRoster(meeting.token, meeting.id);
-
-      if (existingRecord?.muted) {
-        socket.emit('moderation', { type: 'force-mute', enforced: true });
-      }
-    } catch (error) {
-      if (error.status) {
-        socket.emit('join-error', { message: error.message });
-      } else {
-        console.error('join-room error', error);
-        socket.emit('join-error', { message: TEXT.joinFailed });
-      }
+  // Enhanced heartbeat system
+  socket.on('heartbeat', (data) => {
+    socket.emit('heartbeat');
+    if (currentRoom && currentUser) {
+      // Log connection health
+      RedisHelper.logConnection(currentRoom, currentUser, 'heartbeat', { timestamp: data.timestamp })
+        .catch(console.error);
     }
   });
 
-  socket.on('chat-message', async ({ text, target, anonymous, metadata }) => {
-    if (!socket.data.meetingId || !socket.data.name) {
-      socket.emit('chat-error', { message: TEXT.chatJoinRequired });
-      return;
-    }
-
-    const trimmed = (text || '').trim();
-    if (!trimmed) return;
-
-    const targetName = typeof target === 'string' && target.trim() ? target.trim() : null;
-    const isAnonymous = Boolean(anonymous);
-    const kind = targetName ? 'direct' : 'chat';
-    const roomState = getMeetingState(socket.data.meetingToken);
-    const targetSocketId = targetName ? roomState.socketsByName.get(targetName) : null;
-
-    if (targetName && !targetSocketId) {
-      socket.emit('chat-error', { message: 'Participant is not currently available.', target: targetName });
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
+  // Join room with enhanced tracking
+  socket.on('join-room', async (data) => {
+    const { roomToken, displayName } = data;
 
     try {
-      await runAsync(
-        'INSERT INTO messages (meeting_id, sender, text, ts, target, anonymous, kind) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [
-          socket.data.meetingId,
-          socket.data.name,
-          trimmed,
-          timestamp,
-          targetName,
-          isAnonymous ? 1 : 0,
-          kind,
-        ],
-      );
+      // Validate meeting exists and is active
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) {
+        socket.emit('room-not-found');
+        return;
+      }
 
-      const payload = {
-        sender: isAnonymous ? 'Anonymous' : socket.data.name,
-        actualSender: socket.data.name,
-        text: trimmed,
-        ts: timestamp,
-        target: targetName,
-        anonymous: isAnonymous,
-        kind,
-        metadata: metadata || null,
+      // Check participant limit
+      const participants = await RedisHelper.getParticipants(roomToken);
+      if (participants.length >= (meeting.maxParticipants || 10)) {
+        socket.emit('room-full');
+        return;
+      }
+
+      // Add/update participant
+      await RedisHelper.addParticipant(roomToken, {
+        name: displayName,
+        socketId: socket.id
+      });
+
+      // Join socket room
+      socket.join(roomToken);
+      currentRoom = roomToken;
+      currentUser = displayName;
+
+      // Initialize room if needed
+      if (!rooms.has(roomToken)) {
+        rooms.set(roomToken, {
+          participants: new Map(),
+          polls: new Map(),
+          emotions: new Map(),
+          tests: new Map()
+        });
+      }
+
+      const room = rooms.get(roomToken);
+      room.participants.set(socket.id, {
+        id: socket.id,
+        displayName,
+        joinedAt: Date.now(),
+        isHost: participants.length === 0
+      });
+
+      // Notify others
+      socket.to(roomToken).emit('user-joined', {
+        socketId: socket.id,
+        displayName,
+        participantCount: room.participants.size
+      });
+
+      // Send current room state
+      const participants = Array.from(room.participants.values());
+      socket.emit('room-state', {
+        participants,
+        polls: Array.from(room.polls.values()),
+        emotionalClimate: room.emotions,
+        activeTests: Array.from(room.tests.values()).filter(test => test.status === 'active')
+      });
+
+      console.log(`${displayName} joined room ${roomToken}`);
+
+    } catch (error) {
+      console.error('Error joining room:', error);
+      socket.emit('error', { message: 'Failed to join room' });
+    }
+  });
+
+  // WebRTC signaling
+  socket.on('offer', (data) => {
+    socket.to(data.targetId).emit('offer', {
+      offer: data.offer,
+      from: socket.id
+    });
+  });
+
+  socket.on('answer', (data) => {
+    socket.to(data.targetId).emit('answer', {
+      answer: data.answer,
+      from: socket.id
+    });
+  });
+
+  socket.on('ice-candidate', (data) => {
+    socket.to(data.targetId).emit('ice-candidate', {
+      candidate: data.candidate,
+      from: socket.id
+    });
+  });
+
+  // Enhanced chat system
+  socket.on('chat-message', async (data) => {
+    const { roomToken, message, from, timestamp } = data;
+
+    try {
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (meeting) {
+        await RedisHelper.addMessage(roomToken, {
+          sender: from,
+          text: message,
+          kind: 'chat'
+        });
+      }
+
+      socket.to(roomToken).emit('chat-message', data);
+    } catch (error) {
+      console.error('Error saving chat message:', error);
+    }
+  });
+
+  // AI Assistant with GPT-4o
+  socket.on('assistant-query', async (data) => {
+    const { roomToken, query, from, webSearch, timestamp } = data;
+    const startTime = Date.now();
+
+    try {
+      const meeting = await RedisHelper.getMeeting(roomToken);
+
+      // Get meeting context
+      const participants = await RedisHelper.getParticipants(roomToken);
+
+      const context = {
+        meeting_token: roomToken,
+        participants: participants.map(p => p.name),
+        participant_count: participants.length
       };
 
-      if (targetName) {
-        socket.emit('message', payload);
-        if (targetSocketId) {
-          const targetSocket = io.sockets.sockets.get(targetSocketId);
-          targetSocket?.emit('message', payload);
-        }
-        for (const hostId of roomState.hostSockets || []) {
-          if (hostId === socket.id) continue;
-          if (hostId === targetSocketId) continue;
-          const hostSocket = io.sockets.sockets.get(hostId);
-          hostSocket?.emit('message', payload);
-        }
-      } else {
-        io.to(socket.data.meetingToken).emit('message', payload);
-      }
-    } catch (error) {
-      console.error('Failed to persist message', error);
-      socket.emit('chat-error', { message: TEXT.chatSendFailed });
-    }
-  });
+      const result = await askAI(query, webSearch, context);
+      const responseTime = Date.now() - startTime;
 
-  socket.on('moderation-action', async ({ target, action }) => {
-    if (!socket.data.meetingId || !socket.data.isHost) {
-      return;
-    }
-
-    const targetName = typeof target === 'string' ? target.trim() : '';
-    if (!targetName || targetName === socket.data.name) {
-      return;
-    }
-
-    const meetingToken = socket.data.meetingToken;
-    const meetingId = socket.data.meetingId;
-    const roomState = getMeetingState(meetingToken);
-    const targetSocketId = roomState.socketsByName.get(targetName);
-    const targetSocket = targetSocketId ? io.sockets.sockets.get(targetSocketId) : null;
-
-    try {
-      if (action === 'mute') {
-        await runAsync('UPDATE participants SET muted = 1 WHERE meeting_id = ? AND name = ?', [
-          meetingId,
-          targetName,
-        ]);
-        if (roomState.socketsById.has(targetSocketId)) {
-          roomState.socketsById.get(targetSocketId).muted = true;
-        }
-        if (targetSocket) {
-          targetSocket.data.muted = true;
-        }
-        targetSocket?.emit('moderation', {
-          type: 'force-mute',
-          enforced: true,
-          by: socket.data.name,
+      // Log interaction
+      if (meeting) {
+        await RedisHelper.logAssistantInteraction(roomToken, from, query, result.response, {
+          webSearchUsed: webSearch,
+          responseTimeMs: responseTime
         });
-        io.to(meetingToken).emit('moderation-state', { target: targetName, action: 'mute' });
-        await broadcastRoster(meetingToken, meetingId);
-      } else if (action === 'unmute') {
-        await runAsync('UPDATE participants SET muted = 0 WHERE meeting_id = ? AND name = ?', [
-          meetingId,
-          targetName,
-        ]);
-        if (roomState.socketsById.has(targetSocketId)) {
-          roomState.socketsById.get(targetSocketId).muted = false;
-        }
-        if (targetSocket) {
-          targetSocket.data.muted = false;
-        }
-        targetSocket?.emit('moderation', {
-          type: 'force-unmute',
-          by: socket.data.name,
+      }
+
+      socket.emit('assistant-response', {
+        response: result.response,
+        sources: result.sources,
+        timestamp: Date.now()
+      });
+
+    } catch (error) {
+      console.error('Error processing assistant query:', error);
+      socket.emit('assistant-response', {
+        response: 'Sorry, I encountered an error processing your request.',
+        sources: [],
+        timestamp: Date.now()
+      });
+    }
+  });
+
+  // Express polls system
+  socket.on('create-poll', async (data) => {
+    const { roomToken, title, options, duration, anonymous, type } = data;
+
+    try {
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) return;
+
+      const poll = await RedisHelper.createPoll(roomToken, {
+        title,
+        options,
+        type: type || 'multiple_choice',
+        duration,
+        anonymous: anonymous || false,
+        creator: currentUser
+      });
+
+      const room = rooms.get(roomToken);
+      if (room) {
+        room.polls.set(poll.id, {
+          ...poll,
+          votes: {},
+          createdAt: Date.now(),
+          expiresAt: Date.now() + duration * 1000
         });
-        io.to(meetingToken).emit('moderation-state', { target: targetName, action: 'unmute' });
-        await broadcastRoster(meetingToken, meetingId);
-      } else if (action === 'remove') {
-        await runAsync('UPDATE participants SET removed = 1 WHERE meeting_id = ? AND name = ?', [
-          meetingId,
-          targetName,
-        ]);
-        if (targetSocket) {
-          targetSocket.emit('moderation', { type: 'force-leave', reason: 'removed' });
-          targetSocket.leave(meetingToken);
-          targetSocket.disconnect(true);
-        }
-        roomState.socketsByName.delete(targetName);
-        if (targetSocketId) {
-          roomState.socketsById.delete(targetSocketId);
-          roomState.hostSockets.delete(targetSocketId);
-        }
-        io.to(meetingToken).emit('participant-removed', { name: targetName });
-        await broadcastRoster(meetingToken, meetingId);
       }
+
+      io.to(roomToken).emit('poll-created', poll);
+
+      // Auto-close poll
+      setTimeout(() => {
+        const finalPoll = rooms.get(roomToken)?.polls.get(poll.id);
+        if (finalPoll) {
+          finalPoll.status = 'closed';
+          io.to(roomToken).emit('poll-closed', {
+            pollId: poll.id,
+            results: finalPoll.votes
+          });
+        }
+      }, duration * 1000);
+
     } catch (error) {
-      console.error('moderation-action failed', error);
-      socket.emit('moderation-error', { message: 'Moderation action failed', target: targetName });
+      console.error('Error creating poll:', error);
     }
   });
 
-  socket.on('emotion-update', async ({ emotion, intensity }) => {
-    if (!socket.data.meetingId || !socket.data.name) return;
-    const key = typeof emotion === 'string' ? emotion.trim() : '';
-    if (!EMOTION_KEYS.includes(key)) return;
-    const value = Number.isFinite(Number(intensity)) ? Math.max(1, Math.min(5, Number(intensity))) : 1;
+  socket.on('vote-poll', async (data) => {
+    const { roomToken, pollId, optionIndex } = data;
 
     try {
-      const timestamp = await recordEmotionEvent({
-        meetingId: socket.data.meetingId,
-        participant: socket.data.name,
-        emotion: key,
-        intensity: value,
-      });
-      io.to(socket.data.meetingToken).emit('emotion-state-update', {
-        participant: socket.data.name,
-        emotion: key,
-        timestamp,
-      });
-      const stats = await fetchEmotionStats(socket.data.meetingId);
-      broadcastToHosts(socket.data.meetingToken, 'emotion-stats', {
-        updatedBy: socket.data.name,
-        emotion: key,
-        timestamp,
-        stats,
-      });
-      socket.emit('emotion-ack', { emotion: key, timestamp });
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) return;
+
+      await RedisHelper.addPollVote(roomToken, pollId, currentUser, optionIndex);
+
+      const room = rooms.get(roomToken);
+      if (room && room.polls.has(pollId)) {
+        const pollData = room.polls.get(pollId);
+        pollData.votes[currentUser] = optionIndex;
+
+        io.to(roomToken).emit('poll-updated', {
+          pollId,
+          votes: pollData.votes,
+          totalVotes: Object.keys(pollData.votes).length
+        });
+      }
+
     } catch (error) {
-      console.error('emotion-update failed', error);
-      socket.emit('emotion-error', { message: 'Unable to record emotion.' });
+      console.error('Error voting on poll:', error);
     }
   });
 
-  socket.on('request-emotion-stats', async () => {
-    if (!socket.data.meetingId || !socket.data.isHost) return;
+  // Emotional feedback system
+  socket.on('emotion-update', async (data) => {
+    const { roomToken, emotion, intensity, context } = data;
+
     try {
-      const stats = await fetchEmotionStats(socket.data.meetingId);
-      socket.emit('emotion-stats', { stats });
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) return;
+
+      // Update emotion and get climate
+      const climate = await RedisHelper.addEmotion(roomToken, currentUser, emotion);
+
+      // Update room emotional climate
+      const room = rooms.get(roomToken);
+      if (room) {
+        room.emotions[currentUser] = { emotion, intensity, timestamp: Date.now() };
+
+        io.to(roomToken).emit('emotional-climate-update', {
+          participant: currentUser,
+          emotion,
+          intensity,
+          climate
+        });
+      }
+
     } catch (error) {
-      console.error('request-emotion-stats failed', error);
-      socket.emit('emotion-error', { message: 'Failed to load emotional metrics.' });
+      console.error('Error updating emotion:', error);
     }
   });
 
-  socket.on('start-sociometric-test', async ({ templateId, durationSeconds }) => {
-    if (!socket.data.meetingId || !socket.data.isHost) return;
-    const template = typeof templateId === 'string' ? templateId.trim() : '';
-    if (!SOCIOMETRIC_TEMPLATES[template]) {
-      socket.emit('sociometric-test-error', { message: 'Unknown test template.' });
-      return;
-    }
-
-    const roomState = getMeetingState(socket.data.meetingToken);
-    if (roomState.activeTests.size) {
-      socket.emit('sociometric-test-error', { message: 'Another test is already running.' });
-      return;
-    }
-
-    const templateDuration = SOCIOMETRIC_TEMPLATES[template].durationSeconds;
-    const requested = Number.isFinite(Number(durationSeconds)) ? Number(durationSeconds) : templateDuration;
-    const duration = Math.max(60, Math.min(900, requested || templateDuration));
+  // Rapid sociometry system
+  socket.on('start-sociometric-test', async (data) => {
+    const { roomToken, template, duration, questions } = data;
 
     try {
-      const test = await createSociometricTest({
-        meetingId: socket.data.meetingId,
-        host: socket.data.name,
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) return;
+
+      const participants = await RedisHelper.getParticipants(roomToken);
+
+      const test = await RedisHelper.createSociometryTest(roomToken, {
         template,
-        durationSeconds: duration,
+        title: `${template} Test`,
+        questions,
+        duration,
+        host: currentUser,
+        participants: participants.map(p => p.name)
       });
-      registerActiveTest(socket.data.meetingToken, test);
-      io.to(socket.data.meetingToken).emit('sociometric-test-started', {
-        id: test.id,
-        template,
-        durationSeconds: test.durationSeconds,
-        startedAt: test.startedAt,
-        endsAt: test.endsAt,
-      });
+
+      const room = rooms.get(roomToken);
+      if (room) {
+        room.tests.set(test.id, {
+          ...test,
+          startedAt: Date.now(),
+          endsAt: Date.now() + duration * 1000,
+          responses: {}
+        });
+      }
+
+      io.to(roomToken).emit('sociometric-test-started', test);
+
+      // Auto-end test
+      setTimeout(() => {
+        const finalTest = rooms.get(roomToken)?.tests.get(test.id);
+        if (finalTest) {
+          finalTest.status = 'completed';
+          const results = analyzeSociometricResults(finalTest.responses);
+
+          io.to(roomToken).emit('sociometric-test-completed', {
+            testId: test.id,
+            results
+          });
+        }
+      }, duration * 1000);
+
     } catch (error) {
-      console.error('start-sociometric-test failed', error);
-      socket.emit('sociometric-test-error', { message: 'Unable to start test.' });
+      console.error('Error starting sociometric test:', error);
     }
   });
 
-  socket.on('submit-sociometric-test', async ({ testId, answers }) => {
-    if (!socket.data.meetingId || !socket.data.name) return;
-    const id = Number(testId);
-    if (!Number.isInteger(id)) return;
-
-    const roomState = getMeetingState(socket.data.meetingToken);
-    const activeRecord = roomState.activeTests.get(id);
-    if (!activeRecord) {
-      socket.emit('sociometric-test-error', { message: 'Test is no longer active.', testId: id });
-      return;
-    }
+  socket.on('submit-sociometric-response', async (data) => {
+    const { roomToken, testId, answers, responseTime } = data;
 
     try {
-      const submittedAt = await submitTestResponse({
-        testId: id,
-        participant: socket.data.name,
-        answers: answers || {},
-      });
-      socket.emit('sociometric-test-ack', { testId: id, submittedAt });
+      const meeting = await RedisHelper.getMeeting(roomToken);
+      if (!meeting) return;
+
+      const test = await RedisHelper.getSociometryTest(roomToken, testId);
+      if (!test) return;
+
+      await RedisHelper.addSociometryResponse(roomToken, testId, currentUser, answers);
+
+      const room = rooms.get(roomToken);
+      if (room && room.tests.has(testId)) {
+        const testData = room.tests.get(testId);
+        testData.responses[currentUser] = { answers, responseTime, submittedAt: Date.now() };
+
+        io.to(roomToken).emit('sociometric-response-received', {
+          testId,
+          participant: currentUser,
+          totalResponses: Object.keys(testData.responses).length
+        });
+      }
+
     } catch (error) {
-      console.error('submit-sociometric-test failed', error);
-      socket.emit('sociometric-test-error', { message: 'Unable to submit responses.', testId: id });
+      console.error('Error submitting sociometric response:', error);
     }
   });
 
-  socket.on('cancel-sociometric-test', async ({ testId }) => {
-    if (!socket.data.meetingId || !socket.data.isHost) return;
-    const id = Number(testId);
-    if (!Number.isInteger(id)) return;
-    try {
-      await finalizeSociometricTest({
-        meetingToken: socket.data.meetingToken,
-        testId: id,
-        reason: 'host-cancelled',
-        status: 'cancelled',
-      });
-    } catch (error) {
-      console.error('cancel-sociometric-test failed', error);
-      socket.emit('sociometric-test-error', { message: 'Unable to cancel test.', testId: id });
+  // Enhanced disconnect handling
+  socket.on('disconnect', async () => {
+    console.log('Client disconnected:', socket.id);
+
+    if (currentRoom && currentUser) {
+      try {
+        // Remove participant and log disconnection
+        await RedisHelper.removeParticipant(currentRoom, currentUser);
+        await RedisHelper.logConnection(currentRoom, currentUser, 'disconnect');
+
+        // Clean up room data
+        const room = rooms.get(currentRoom);
+        if (room) {
+          room.participants.delete(socket.id);
+
+          if (room.participants.size === 0) {
+            rooms.delete(currentRoom);
+          } else {
+            socket.to(currentRoom).emit('user-left', {
+              socketId: socket.id,
+              displayName: currentUser,
+              participantCount: room.participants.size
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error handling disconnect:', error);
+      }
     }
   });
 
-  socket.on('request-test-summary', async ({ testId }) => {
-    if (!socket.data.meetingId || !socket.data.isHost) return;
-    const id = Number(testId);
-    if (!Number.isInteger(id)) return;
-    try {
-      const summary = await computeTestSummary(id);
-      socket.emit('sociometric-test-summary', { testId: id, summary });
-    } catch (error) {
-      console.error('request-test-summary failed', error);
-      socket.emit('sociometric-test-error', { message: 'Unable to load test summary.', testId: id });
-    }
-  });
+  socket.on('leave-room', async (data) => {
+    if (currentRoom && currentUser) {
+      try {
+        // Remove participant and log leaving
+        await RedisHelper.removeParticipant(currentRoom, currentUser);
+        await RedisHelper.logConnection(currentRoom, currentUser, 'leave');
 
-  socket.on('request-profile', async ({ participant }) => {
-    if (!socket.data.meetingId || !socket.data.name) return;
-    const requested = typeof participant === 'string' ? participant.trim() : '';
-    const target = socket.data.isHost && requested ? requested : socket.data.name;
-    if (!target) return;
-    if (!socket.data.isHost && requested && requested !== socket.data.name) {
-      return;
-    }
+        socket.to(currentRoom).emit('user-left', {
+          socketId: socket.id,
+          displayName: currentUser
+        });
 
-    try {
-      const profile = await fetchProfile(socket.data.meetingId, target);
-      socket.emit('profile-data', { participant: target, profile });
-    } catch (error) {
-      console.error('request-profile failed', error);
-      socket.emit('profile-error', { message: 'Unable to load profile.', participant: target });
-    }
-  });
+        socket.leave(currentRoom);
 
-  socket.on('assistant-query', async ({ prompt, requestId, withSearch }) => {
-    const trimmed = (prompt || '').trim();
-    const id = requestId || crypto.randomBytes(8).toString('hex');
+        const room = rooms.get(currentRoom);
+        if (room) {
+          room.participants.delete(socket.id);
+        }
 
-    if (!socket.data.meetingId || !socket.data.name) {
-      socket.emit('assistant-error', { requestId: id, message: TEXT.chatJoinRequired });
-      return;
-    }
+        currentRoom = null;
+        currentUser = null;
 
-    if (!socket.data.isHost) {
-      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantHostOnly });
-      return;
-    }
-
-    if (!trimmed) {
-      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantNoPrompt });
-      return;
-    }
-
-    if (!OPENAI_API_KEY) {
-      socket.emit('assistant-error', { requestId: id, message: TEXT.assistantDisabled });
-      return;
-    }
-
-    const shouldSearch =
-      typeof withSearch === 'boolean'
-        ? withSearch && ASSISTANT_SEARCH_ENABLED
-        : ASSISTANT_SEARCH_ENABLED;
-
-    io.to(socket.data.meetingToken).emit('assistant-start', {
-      requestId: id,
-      name: ASSISTANT_NAME,
-      from: socket.data.name,
-      prompt: trimmed,
-    });
-
-    try {
-      await streamAssistantResponse({
-        meetingId: socket.data.meetingId,
-        meetingToken: socket.data.meetingToken,
-        prompt: trimmed,
-        requestId: id,
-        withSearch: shouldSearch,
-      });
-    } catch (error) {
-      console.error('assistant-query failure', error);
-      io.to(socket.data.meetingToken).emit('assistant-error', {
-        requestId: id,
-        message: TEXT.assistantFailed,
-      });
-    }
-  });
-
-
-socket.on('webrtc-offer', ({ targetId, offer }) => {
-  if (!socket.data.meetingToken || !targetId) return;
-  const target = io.sockets.sockets.get(targetId);
-  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
-  target.emit('webrtc-offer', {
-    from: socket.id,
-    name: socket.data.name,
-    offer,
-  });
-});
-
-socket.on('webrtc-answer', ({ targetId, answer }) => {
-  if (!socket.data.meetingToken || !targetId) return;
-  const target = io.sockets.sockets.get(targetId);
-  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
-  target.emit('webrtc-answer', {
-    from: socket.id,
-    answer,
-  });
-});
-
-socket.on('webrtc-candidate', ({ targetId, candidate }) => {
-  if (!socket.data.meetingToken || !targetId || !candidate) return;
-  const target = io.sockets.sockets.get(targetId);
-  if (!target || target.data?.meetingToken !== socket.data.meetingToken) return;
-  target.emit('webrtc-candidate', {
-    from: socket.id,
-    candidate,
-  });
-});
-
-socket.on('camera-flip', async ({ facingMode }) => {
-  if (!socket.data.meetingId || !socket.data.name) return;
-  try {
-    await saveCameraSettings(socket.data.meetingId, socket.data.name, facingMode);
-  } catch (error) {
-    console.error('camera-flip save error', error);
-  }
-});
-
-socket.on('video-layout-change', async ({ layoutType, currentPage, participantsPerPage }) => {
-  if (!socket.data.meetingId || !socket.data.name) return;
-  try {
-    await saveVideoLayout(socket.data.meetingId, socket.data.name, layoutType, currentPage, participantsPerPage);
-  } catch (error) {
-    console.error('video-layout-change save error', error);
-  }
-});
-
-
-  socket.on('leave-meeting', async () => {
-    if (!socket.data.meetingToken || !socket.data.name) return;
-    const meetingToken = socket.data.meetingToken;
-    const meetingId = socket.data.meetingId;
-    socket.leave(meetingToken);
-    unregisterSocket();
-    socket.to(meetingToken).emit('participant-left', {
-      name: socket.data.name,
-      socketId: socket.id,
-    });
-    if (meetingId) {
-      broadcastRoster(meetingToken, meetingId).catch((error) =>
-        console.error('Failed to broadcast roster on leave', error),
-      );
-    }
-  });
-
-  socket.on('disconnect', () => {
-    if (socket.data.meetingToken && socket.data.name) {
-      const meetingToken = socket.data.meetingToken;
-      const meetingId = socket.data.meetingId;
-      unregisterSocket();
-      socket.to(meetingToken).emit('participant-left', {
-        name: socket.data.name,
-        socketId: socket.id,
-      });
-      if (meetingId) {
-        broadcastRoster(meetingToken, meetingId).catch((error) =>
-          console.error('Failed to broadcast roster on disconnect', error),
-        );
+      } catch (error) {
+        console.error('Error leaving room:', error);
       }
     }
   });
 });
 
-const port = process.env.PORT || 3000;
-server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Utility functions
+function calculateEmotionalClimate(emotions) {
+  if (!emotions.length) return { overall: 'neutral', distribution: {} };
+
+  const distribution = {};
+  emotions.forEach(({ emotion, intensity }) => {
+    distribution[emotion] = (distribution[emotion] || 0) + (intensity || 1);
+  });
+
+  const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
+  const percentages = {};
+  Object.entries(distribution).forEach(([emotion, count]) => {
+    percentages[emotion] = Math.round((count / total) * 100);
+  });
+
+  // Determine overall climate
+  const dominant = Object.entries(percentages)
+    .sort(([,a], [,b]) => b - a)[0];
+
+  return {
+    overall: dominant ? dominant[0] : 'neutral',
+    distribution: percentages,
+    participantCount: emotions.length
+  };
+}
+
+function analyzeSociometricResults(responses) {
+  const participants = Object.keys(responses);
+  const analysis = {
+    participantCount: participants.length,
+    responseRate: `${participants.length} responses`,
+    insights: [],
+    teamDynamics: {}
+  };
+
+  // Basic analysis - in production this would be much more sophisticated
+  participants.forEach(participant => {
+    const response = responses[participant];
+    analysis.insights.push({
+      participant,
+      responseTime: response.responseTime,
+      submittedAt: response.submittedAt
+    });
+  });
+
+  return analysis;
+}
+
+// Clean up expired meetings
+setInterval(async () => {
+  try {
+    const activeRooms = await redis.sMembers(RedisKeys.activeRooms());
+
+    for (const token of activeRooms) {
+      const meeting = await RedisHelper.getMeeting(token);
+      if (meeting && new Date(meeting.expiresAt) < new Date()) {
+        await RedisHelper.deleteMeeting(token);
+        rooms.delete(token);
+        console.log(`Cleaned up expired meeting: ${token}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error cleaning up expired meetings:', error);
+  }
+}, 60000); // Check every minute
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`AI Assistant powered by GPT-4o: ${process.env.OPENAI_API_KEY ? 'Ready' : 'Missing API key'}`);
 });

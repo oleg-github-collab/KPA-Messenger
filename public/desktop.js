@@ -25,6 +25,21 @@ class DesktopVideoCall {
     this.assistantMessages = [];
     this.sidebarCollapsed = false;
 
+    // Advanced features state
+    this.polls = new Map(); // Store active polls
+    this.currentPoll = null;
+    this.emotions = new Map(); // Store emotion data
+    this.currentEmotion = null;
+    this.sociometryTests = new Map(); // Store sociometry data
+    this.currentSociometryTest = null;
+    this.currentTestQuestions = [];
+    this.currentQuestionIndex = 0;
+    this.testResponses = [];
+
+    // Feature toggle states
+    this.emotionPanelActive = false;
+    this.climateDisplayActive = false;
+
     this.initializeElements();
     this.setupEventListeners();
     this.checkRoomToken();
@@ -66,6 +81,7 @@ class DesktopVideoCall {
     this.shareBtn = document.getElementById('shareBtn');
     this.endCallBtn = document.getElementById('endCallBtn');
     this.expandIcon = document.getElementById('expandIcon');
+    this.fullscreenBtn = document.getElementById('fullscreenBtn');
 
     // UI elements
     this.callTimer = document.getElementById('callTimer');
@@ -101,6 +117,67 @@ class DesktopVideoCall {
     // Bottom controls
     this.bottomControls = document.getElementById('bottomControls');
     this.smallVideo = document.getElementById('smallVideo');
+
+    // Feature toggle buttons
+    this.featureToggles = document.getElementById('featureToggles');
+    this.togglePolls = document.getElementById('togglePolls');
+    this.toggleEmotions = document.getElementById('toggleEmotions');
+    this.toggleSociometry = document.getElementById('toggleSociometry');
+    this.toggleChat = document.getElementById('toggleChat');
+
+    // Polls system elements
+    this.pollCreationModal = document.getElementById('pollCreationModal');
+    this.pollForm = document.getElementById('pollForm');
+    this.pollQuestion = document.getElementById('pollQuestion');
+    this.pollDescription = document.getElementById('pollDescription');
+    this.pollType = document.getElementById('pollType');
+    this.pollDuration = document.getElementById('pollDuration');
+    this.pollOptionsContainer = document.getElementById('pollOptionsContainer');
+    this.addOptionBtn = document.getElementById('addOptionBtn');
+    this.createPollBtn = document.getElementById('createPollBtn');
+    this.cancelPollBtn = document.getElementById('cancelPollBtn');
+
+    // Active poll elements
+    this.activePoll = document.getElementById('activePoll');
+    this.pollHeader = document.getElementById('pollHeader');
+    this.pollQuestionText = document.getElementById('pollQuestionText');
+    this.pollDescriptionText = document.getElementById('pollDescriptionText');
+    this.pollOptions = document.getElementById('pollOptions');
+    this.pollTimer = document.getElementById('pollTimer');
+    this.pollStats = document.getElementById('pollStats');
+    this.pollActions = document.getElementById('pollActions');
+    this.voteBtn = document.getElementById('voteBtn');
+    this.viewResultsBtn = document.getElementById('viewResultsBtn');
+
+    // Emotional feedback elements
+    this.emotionPanel = document.getElementById('emotionPanel');
+    this.emotionSelector = document.getElementById('emotionSelector');
+    this.emotionSubmit = document.getElementById('emotionSubmit');
+    this.climateDisplay = document.getElementById('climateDisplay');
+    this.climateScore = document.getElementById('climateScore');
+    this.climateEmotions = document.getElementById('climateEmotions');
+    this.climateStats = document.getElementById('climateStats');
+
+    // Sociometry elements
+    this.sociometryModal = document.getElementById('sociometryModal');
+    this.sociometryTemplates = document.getElementById('sociometryTemplates');
+    this.startTestBtn = document.getElementById('startTestBtn');
+    this.cancelSociometryBtn = document.getElementById('cancelSociometryBtn');
+
+    // Active sociometry test elements
+    this.activeSociometry = document.getElementById('activeSociometry');
+    this.testQuestion = document.getElementById('testQuestion');
+    this.responseScale = document.getElementById('responseScale');
+    this.testProgress = document.getElementById('testProgress');
+    this.testProgressBar = document.getElementById('testProgressBar');
+    this.nextQuestionBtn = document.getElementById('nextQuestionBtn');
+
+    // Results panel elements
+    this.resultsPanel = document.getElementById('resultsPanel');
+    this.resultsContent = document.getElementById('resultsContent');
+    this.resultsSummary = document.getElementById('resultsSummary');
+    this.resultsChart = document.getElementById('resultsChart');
+    this.closeResultsBtn = document.getElementById('closeResultsBtn');
   }
 
   setupEventListeners() {
@@ -123,6 +200,7 @@ class DesktopVideoCall {
     this.moreOptionsBtn.addEventListener('click', this.showMoreOptions.bind(this));
     this.recordBtn.addEventListener('click', this.toggleRecording.bind(this));
     this.settingsBtn.addEventListener('click', this.showSettings.bind(this));
+    this.fullscreenBtn.addEventListener('click', this.toggleFullscreen.bind(this));
 
     // Name form
     this.nameForm.addEventListener('submit', this.submitName.bind(this));
@@ -159,9 +237,52 @@ class DesktopVideoCall {
     window.addEventListener('online', this.handleOnline.bind(this));
     window.addEventListener('offline', this.handleOffline.bind(this));
 
+    // Document visibility change (for PiP)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
+
     // Auto-resize chat input
     this.desktopChatInput.addEventListener('input', this.autoResizeInput.bind(this));
     this.assistantInput.addEventListener('input', this.autoResizeInput.bind(this));
+
+    // Feature toggle buttons
+    if (this.togglePolls) this.togglePolls.addEventListener('click', this.showPollCreationModal.bind(this));
+    if (this.toggleEmotions) this.toggleEmotions.addEventListener('click', this.toggleEmotionPanel.bind(this));
+    if (this.toggleSociometry) this.toggleSociometry.addEventListener('click', this.showSociometryModal.bind(this));
+    if (this.toggleChat) this.toggleChat.addEventListener('click', this.openChat.bind(this));
+
+    // Polls functionality
+    if (this.pollForm) this.pollForm.addEventListener('submit', this.createPoll.bind(this));
+    if (this.addOptionBtn) this.addOptionBtn.addEventListener('click', this.addPollOption.bind(this));
+    if (this.createPollBtn) this.createPollBtn.addEventListener('click', this.createPoll.bind(this));
+    if (this.cancelPollBtn) this.cancelPollBtn.addEventListener('click', this.hidePollCreationModal.bind(this));
+    if (this.voteBtn) this.voteBtn.addEventListener('click', this.submitVote.bind(this));
+    if (this.viewResultsBtn) this.viewResultsBtn.addEventListener('click', this.showPollResults.bind(this));
+
+    // Emotions functionality
+    if (this.emotionSubmit) this.emotionSubmit.addEventListener('click', this.submitEmotion.bind(this));
+
+    // Sociometry functionality
+    if (this.startTestBtn) this.startTestBtn.addEventListener('click', this.startSociometryTest.bind(this));
+    if (this.cancelSociometryBtn) this.cancelSociometryBtn.addEventListener('click', this.hideSociometryModal.bind(this));
+    if (this.nextQuestionBtn) this.nextQuestionBtn.addEventListener('click', this.nextQuestion.bind(this));
+
+    // Results functionality
+    if (this.closeResultsBtn) this.closeResultsBtn.addEventListener('click', this.hideResults.bind(this));
+
+    // Emotion selector events
+    if (this.emotionSelector) {
+      this.emotionSelector.addEventListener('click', this.handleEmotionSelection.bind(this));
+    }
+
+    // Sociometry template selection
+    if (this.sociometryTemplates) {
+      this.sociometryTemplates.addEventListener('click', this.handleTemplateSelection.bind(this));
+    }
+
+    // Response scale events
+    if (this.responseScale) {
+      this.responseScale.addEventListener('click', this.handleScaleResponse.bind(this));
+    }
   }
 
   checkRoomToken() {
@@ -294,6 +415,17 @@ class DesktopVideoCall {
     this.socket.on('room-full', () => this.showNotification('Meeting is full', 'error'));
     this.socket.on('room-not-found', () => this.showNotification('Meeting not found', 'error'));
     this.socket.on('heartbeat', () => this.lastHeartbeat = Date.now());
+
+    // Advanced features events
+    this.socket.on('poll-created', this.handlePollCreated.bind(this));
+    this.socket.on('poll-vote', this.handlePollVote.bind(this));
+    this.socket.on('poll-ended', this.handlePollEnded.bind(this));
+    this.socket.on('emotion-submitted', this.handleEmotionSubmitted.bind(this));
+    this.socket.on('climate-updated', this.handleClimateUpdated.bind(this));
+    this.socket.on('sociometry-started', this.handleSociometryStarted.bind(this));
+    this.socket.on('sociometry-response', this.handleSociometryResponse.bind(this));
+    this.socket.on('sociometry-completed', this.handleSociometryCompleted.bind(this));
+    this.socket.on('test-results', this.handleTestResults.bind(this));
   }
 
   async createPeerConnection(participantId) {
@@ -910,6 +1042,54 @@ class DesktopVideoCall {
     this.showNotification('Settings panel coming soon', 'info');
   }
 
+  async toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement) {
+        // Enter fullscreen
+        const element = document.documentElement;
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+          await element.webkitRequestFullscreen();
+        } else if (element.mozRequestFullScreen) {
+          await element.mozRequestFullScreen();
+        } else if (element.msRequestFullscreen) {
+          await element.msRequestFullscreen();
+        }
+
+        this.fullscreenBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        `;
+        this.fullscreenBtn.title = 'Exit fullscreen';
+        this.showNotification('Entered fullscreen mode', 'success');
+      } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
+
+        this.fullscreenBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        `;
+        this.fullscreenBtn.title = 'Toggle fullscreen';
+        this.showNotification('Exited fullscreen mode', 'success');
+      }
+    } catch (error) {
+      console.error('Fullscreen error:', error);
+      this.showNotification('Fullscreen not supported', 'error');
+    }
+  }
+
   // Timer Functions
   startCallTimer() {
     this.callStartTime = Date.now();
@@ -1093,6 +1273,46 @@ class DesktopVideoCall {
     this.updateConnectionStatus('disconnected');
   }
 
+  async handleVisibilityChange() {
+    if (document.hidden) {
+      // Browser tab/window is not visible, try to enter PiP mode
+      await this.enterPictureInPicture();
+    } else {
+      // Browser tab/window is visible again, exit PiP mode
+      await this.exitPictureInPicture();
+    }
+  }
+
+  async enterPictureInPicture() {
+    try {
+      // Only enter PiP if we have video playing and PiP is supported
+      const activeVideo = this.remoteVideo.srcObject ? this.remoteVideo : this.localVideo;
+
+      if (activeVideo && activeVideo.srcObject && 'pictureInPictureEnabled' in document) {
+        if (document.pictureInPictureElement) {
+          return; // Already in PiP mode
+        }
+
+        await activeVideo.requestPictureInPicture();
+        console.log('Entered Picture-in-Picture mode');
+        this.showNotification('Minimized to picture-in-picture', 'info');
+      }
+    } catch (error) {
+      console.log('Picture-in-Picture not available or failed:', error.message);
+    }
+  }
+
+  async exitPictureInPicture() {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        console.log('Exited Picture-in-Picture mode');
+      }
+    } catch (error) {
+      console.error('Error exiting Picture-in-Picture:', error);
+    }
+  }
+
   showError(message) {
     this.nameError.textContent = message;
     this.nameError.classList.remove('hidden');
@@ -1106,6 +1326,805 @@ class DesktopVideoCall {
     setTimeout(() => {
       this.videoNotice.classList.add('hidden');
     }, 4000);
+  }
+
+  // ==================== ADVANCED FEATURES IMPLEMENTATION ====================
+
+  // ==================== POLLS SYSTEM ====================
+  showPollCreationModal() {
+    if (this.pollCreationModal) {
+      this.pollCreationModal.classList.remove('hidden');
+      if (this.pollQuestion) this.pollQuestion.focus();
+      this.initializePollOptions();
+    }
+  }
+
+  hidePollCreationModal() {
+    if (this.pollCreationModal) {
+      this.pollCreationModal.classList.add('hidden');
+      this.resetPollForm();
+    }
+  }
+
+  initializePollOptions() {
+    if (this.pollOptionsContainer) {
+      this.pollOptionsContainer.innerHTML = `
+        <div class="poll-option-input">
+          <input type="text" placeholder="Option 1" required>
+          <button type="button" class="remove-option" onclick="this.parentElement.remove()" style="display: none;">×</button>
+        </div>
+        <div class="poll-option-input">
+          <input type="text" placeholder="Option 2" required>
+          <button type="button" class="remove-option" onclick="this.parentElement.remove()" style="display: none;">×</button>
+        </div>
+      `;
+    }
+  }
+
+  addPollOption() {
+    if (this.pollOptionsContainer) {
+      const optionCount = this.pollOptionsContainer.children.length;
+      if (optionCount >= 6) {
+        this.showNotification('Maximum 6 options allowed', 'warning');
+        return;
+      }
+
+      const optionDiv = document.createElement('div');
+      optionDiv.className = 'poll-option-input';
+      optionDiv.innerHTML = `
+        <input type="text" placeholder="Option ${optionCount + 1}" required>
+        <button type="button" class="remove-option" onclick="this.parentElement.remove()">×</button>
+      `;
+
+      this.pollOptionsContainer.appendChild(optionDiv);
+      optionDiv.querySelector('input').focus();
+    }
+  }
+
+  createPoll(event) {
+    if (event) event.preventDefault();
+
+    const question = this.pollQuestion?.value.trim();
+    const description = this.pollDescription?.value.trim();
+    const type = this.pollType?.value || 'multiple-choice';
+    const duration = parseInt(this.pollDuration?.value) || 60;
+
+    if (!question) {
+      this.showNotification('Poll question is required', 'error');
+      return;
+    }
+
+    const optionInputs = this.pollOptionsContainer?.querySelectorAll('.poll-option-input input');
+    const options = [];
+
+    if (optionInputs) {
+      optionInputs.forEach((input, index) => {
+        const value = input.value.trim();
+        if (value) {
+          options.push({
+            id: index,
+            text: value,
+            votes: 0,
+            voters: []
+          });
+        }
+      });
+    }
+
+    if (options.length < 2) {
+      this.showNotification('At least 2 options are required', 'error');
+      return;
+    }
+
+    const pollData = {
+      roomToken: this.roomToken,
+      question,
+      description,
+      type,
+      duration: duration * 1000, // Convert to milliseconds
+      options,
+      creator: this.displayName,
+      createdAt: Date.now(),
+      endsAt: Date.now() + (duration * 1000)
+    };
+
+    this.socket.emit('create-poll', pollData);
+    this.hidePollCreationModal();
+  }
+
+  resetPollForm() {
+    if (this.pollQuestion) this.pollQuestion.value = '';
+    if (this.pollDescription) this.pollDescription.value = '';
+    if (this.pollType) this.pollType.value = 'multiple-choice';
+    if (this.pollDuration) this.pollDuration.value = '60';
+    this.initializePollOptions();
+  }
+
+  handlePollCreated(pollData) {
+    this.currentPoll = pollData;
+    this.polls.set(pollData.id, pollData);
+    this.displayActivePoll(pollData);
+    this.showNotification(`New poll: ${pollData.question}`, 'info');
+  }
+
+  displayActivePoll(pollData) {
+    if (!this.activePoll) return;
+
+    if (this.pollQuestionText) this.pollQuestionText.textContent = pollData.question;
+    if (this.pollDescriptionText) {
+      this.pollDescriptionText.textContent = pollData.description;
+      this.pollDescriptionText.style.display = pollData.description ? 'block' : 'none';
+    }
+
+    if (this.pollOptions) {
+      this.pollOptions.innerHTML = pollData.options.map(option => `
+        <div class="poll-option" data-option-id="${option.id}">
+          <div class="poll-option-content">
+            <span class="poll-option-text">${option.text}</span>
+            <span class="poll-option-votes">${option.votes} votes</span>
+          </div>
+          <div class="poll-option-bar" style="width: ${this.calculateVotePercentage(option, pollData)}%"></div>
+        </div>
+      `).join('');
+
+      // Add click handlers
+      this.pollOptions.querySelectorAll('.poll-option').forEach(option => {
+        option.addEventListener('click', () => {
+          this.selectPollOption(option.dataset.optionId);
+        });
+      });
+    }
+
+    this.activePoll.classList.remove('hidden');
+    this.startPollTimer(pollData);
+  }
+
+  selectPollOption(optionId) {
+    // Clear previous selections
+    this.pollOptions.querySelectorAll('.poll-option').forEach(option => {
+      option.classList.remove('selected');
+    });
+
+    // Select new option
+    const selectedOption = this.pollOptions.querySelector(`[data-option-id="${optionId}"]`);
+    if (selectedOption) {
+      selectedOption.classList.add('selected');
+      this.selectedPollOption = optionId;
+
+      if (this.voteBtn) {
+        this.voteBtn.disabled = false;
+      }
+    }
+  }
+
+  submitVote() {
+    if (!this.selectedPollOption || !this.currentPoll) return;
+
+    this.socket.emit('poll-vote', {
+      roomToken: this.roomToken,
+      pollId: this.currentPoll.id,
+      optionId: this.selectedPollOption,
+      voter: this.displayName
+    });
+
+    if (this.voteBtn) this.voteBtn.disabled = true;
+  }
+
+  handlePollVote(data) {
+    if (this.currentPoll && this.currentPoll.id === data.pollId) {
+      const option = this.currentPoll.options.find(opt => opt.id == data.optionId);
+      if (option) {
+        option.votes++;
+        if (!option.voters.includes(data.voter)) {
+          option.voters.push(data.voter);
+        }
+        this.updatePollDisplay();
+      }
+    }
+  }
+
+  updatePollDisplay() {
+    if (!this.currentPoll || !this.pollOptions) return;
+
+    this.pollOptions.querySelectorAll('.poll-option').forEach((optionElement, index) => {
+      const option = this.currentPoll.options[index];
+      if (option) {
+        const votesSpan = optionElement.querySelector('.poll-option-votes');
+        const bar = optionElement.querySelector('.poll-option-bar');
+
+        if (votesSpan) votesSpan.textContent = `${option.votes} votes`;
+        if (bar) bar.style.width = `${this.calculateVotePercentage(option, this.currentPoll)}%`;
+      }
+    });
+
+    this.updatePollStats();
+  }
+
+  calculateVotePercentage(option, pollData) {
+    const totalVotes = pollData.options.reduce((sum, opt) => sum + opt.votes, 0);
+    return totalVotes > 0 ? Math.round((option.votes / totalVotes) * 100) : 0;
+  }
+
+  updatePollStats() {
+    if (!this.pollStats || !this.currentPoll) return;
+
+    const totalVotes = this.currentPoll.options.reduce((sum, opt) => sum + opt.votes, 0);
+    const participantCount = this.participants.size;
+
+    this.pollStats.innerHTML = `
+      <span>Total votes: ${totalVotes}</span>
+      <span>Participants: ${participantCount}</span>
+    `;
+  }
+
+  startPollTimer(pollData) {
+    if (!this.pollTimer) return;
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const timeLeft = Math.max(0, pollData.endsAt - now);
+
+      if (timeLeft <= 0) {
+        this.pollTimer.textContent = 'Poll ended';
+        return;
+      }
+
+      const seconds = Math.ceil(timeLeft / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+
+      this.pollTimer.textContent = `${minutes}:${remainingSeconds.toString().padStart(2, '0')} remaining`;
+    };
+
+    updateTimer();
+    const timerInterval = setInterval(updateTimer, 1000);
+
+    setTimeout(() => {
+      clearInterval(timerInterval);
+      this.handlePollEnded({ pollId: pollData.id });
+    }, pollData.duration);
+  }
+
+  handlePollEnded(data) {
+    if (this.currentPoll && this.currentPoll.id === data.pollId) {
+      this.showNotification('Poll has ended', 'info');
+      if (this.voteBtn) this.voteBtn.disabled = true;
+
+      setTimeout(() => {
+        this.hidePoll();
+      }, 3000);
+    }
+  }
+
+  showPollResults() {
+    if (!this.currentPoll) return;
+
+    this.displayResults({
+      type: 'poll',
+      title: 'Poll Results',
+      data: this.currentPoll
+    });
+  }
+
+  hidePoll() {
+    if (this.activePoll) {
+      this.activePoll.classList.add('hidden');
+    }
+    this.currentPoll = null;
+    this.selectedPollOption = null;
+  }
+
+  // ==================== EMOTIONAL FEEDBACK SYSTEM ====================
+  toggleEmotionPanel() {
+    if (!this.emotionPanel) return;
+
+    this.emotionPanelActive = !this.emotionPanelActive;
+
+    if (this.emotionPanelActive) {
+      this.emotionPanel.classList.add('active');
+      this.initializeEmotionSelector();
+    } else {
+      this.emotionPanel.classList.remove('active');
+    }
+  }
+
+  initializeEmotionSelector() {
+    if (!this.emotionSelector) return;
+
+    const emotions = [
+      { emoji: '😊', name: 'Happy', value: 'happy' },
+      { emoji: '😢', name: 'Sad', value: 'sad' },
+      { emoji: '😡', name: 'Angry', value: 'angry' },
+      { emoji: '😴', name: 'Tired', value: 'tired' },
+      { emoji: '🤔', name: 'Confused', value: 'confused' },
+      { emoji: '😎', name: 'Cool', value: 'cool' },
+      { emoji: '🥳', name: 'Excited', value: 'excited' },
+      { emoji: '😰', name: 'Anxious', value: 'anxious' },
+      { emoji: '🤗', name: 'Grateful', value: 'grateful' }
+    ];
+
+    this.emotionSelector.innerHTML = emotions.map(emotion => `
+      <button class="emotion-btn" data-emotion="${emotion.value}">
+        <span class="emotion-emoji">${emotion.emoji}</span>
+        <span class="emotion-label">${emotion.name}</span>
+      </button>
+    `).join('');
+  }
+
+  handleEmotionSelection(event) {
+    const emotionBtn = event.target.closest('.emotion-btn');
+    if (!emotionBtn) return;
+
+    // Clear previous selection
+    this.emotionSelector.querySelectorAll('.emotion-btn').forEach(btn => {
+      btn.classList.remove('selected');
+    });
+
+    // Select new emotion
+    emotionBtn.classList.add('selected');
+    this.currentEmotion = emotionBtn.dataset.emotion;
+
+    if (this.emotionSubmit) {
+      this.emotionSubmit.disabled = false;
+    }
+  }
+
+  submitEmotion() {
+    if (!this.currentEmotion) return;
+
+    this.socket.emit('emotion-feedback', {
+      roomToken: this.roomToken,
+      emotion: this.currentEmotion,
+      participant: this.displayName,
+      timestamp: Date.now()
+    });
+
+    this.showNotification('Emotion submitted!', 'success');
+
+    // Reset selection
+    this.emotionSelector.querySelectorAll('.emotion-btn').forEach(btn => {
+      btn.classList.remove('selected');
+    });
+
+    this.currentEmotion = null;
+    if (this.emotionSubmit) this.emotionSubmit.disabled = true;
+
+    // Auto-hide panel after submission
+    setTimeout(() => {
+      this.toggleEmotionPanel();
+    }, 2000);
+  }
+
+  handleEmotionSubmitted(data) {
+    this.emotions.set(data.participant, data);
+    this.showNotification(`${data.participant} shared their emotion`, 'info');
+  }
+
+  handleClimateUpdated(climateData) {
+    this.displayEmotionalClimate(climateData);
+  }
+
+  displayEmotionalClimate(climateData) {
+    if (!this.climateDisplay) return;
+
+    // Show climate display
+    this.climateDisplay.classList.add('active');
+    this.climateDisplayActive = true;
+
+    // Update score
+    if (this.climateScore) {
+      this.climateScore.textContent = `${climateData.score}%`;
+      this.climateScore.className = `climate-score ${climateData.sentiment}`;
+    }
+
+    // Update emotions display
+    if (this.climateEmotions) {
+      this.climateEmotions.innerHTML = climateData.topEmotions
+        .slice(0, 5)
+        .map(emotion => `<span>${emotion.emoji}</span>`)
+        .join('');
+    }
+
+    // Update stats
+    if (this.climateStats) {
+      this.climateStats.innerHTML = `
+        <div>Responses: ${climateData.totalResponses}</div>
+        <div>Updated: ${new Date(climateData.lastUpdated).toLocaleTimeString()}</div>
+      `;
+    }
+
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+      if (this.climateDisplayActive) {
+        this.climateDisplay.classList.remove('active');
+        this.climateDisplayActive = false;
+      }
+    }, 10000);
+  }
+
+  // ==================== SOCIOMETRY SYSTEM ====================
+  showSociometryModal() {
+    if (this.sociometryModal) {
+      this.sociometryModal.classList.remove('hidden');
+      this.initializeSociometryTemplates();
+    }
+  }
+
+  hideSociometryModal() {
+    if (this.sociometryModal) {
+      this.sociometryModal.classList.add('hidden');
+      this.selectedTemplate = null;
+    }
+  }
+
+  initializeSociometryTemplates() {
+    if (!this.sociometryTemplates) return;
+
+    const templates = [
+      {
+        id: 'pulse-check',
+        icon: '💓',
+        title: 'Pulse Check',
+        desc: 'Quick team energy assessment'
+      },
+      {
+        id: 'focus-scan',
+        icon: '🎯',
+        title: 'Focus Scan',
+        desc: 'Measure attention and engagement'
+      },
+      {
+        id: 'team-resonance',
+        icon: '🤝',
+        title: 'Team Resonance',
+        desc: 'Evaluate team harmony and connection'
+      }
+    ];
+
+    this.sociometryTemplates.innerHTML = templates.map(template => `
+      <div class="template-card" data-template-id="${template.id}">
+        <span class="template-icon">${template.icon}</span>
+        <div class="template-title">${template.title}</div>
+        <div class="template-desc">${template.desc}</div>
+      </div>
+    `).join('');
+  }
+
+  handleTemplateSelection(event) {
+    const templateCard = event.target.closest('.template-card');
+    if (!templateCard) return;
+
+    // Clear previous selection
+    this.sociometryTemplates.querySelectorAll('.template-card').forEach(card => {
+      card.classList.remove('selected');
+    });
+
+    // Select new template
+    templateCard.classList.add('selected');
+    this.selectedTemplate = templateCard.dataset.templateId;
+
+    if (this.startTestBtn) {
+      this.startTestBtn.disabled = false;
+    }
+  }
+
+  startSociometryTest() {
+    if (!this.selectedTemplate) return;
+
+    const testData = {
+      roomToken: this.roomToken,
+      template: this.selectedTemplate,
+      creator: this.displayName,
+      participants: Array.from(this.participants.keys()),
+      startTime: Date.now()
+    };
+
+    this.socket.emit('start-sociometry', testData);
+    this.hideSociometryModal();
+  }
+
+  handleSociometryStarted(testData) {
+    this.currentSociometryTest = testData;
+    this.currentTestQuestions = this.getQuestionsForTemplate(testData.template);
+    this.currentQuestionIndex = 0;
+    this.testResponses = [];
+
+    this.displayActiveSociometryTest();
+    this.showNotification(`Sociometry test started: ${this.getTemplateTitle(testData.template)}`, 'info');
+  }
+
+  getQuestionsForTemplate(template) {
+    const questions = {
+      'pulse-check': [
+        { text: 'How energized do you feel right now?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How motivated are you for this meeting?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How comfortable do you feel sharing ideas?', scale: [1, 2, 3, 4, 5] }
+      ],
+      'focus-scan': [
+        { text: 'How focused are you on the current topic?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How well can you follow the discussion?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How engaged do you feel?', scale: [1, 2, 3, 4, 5] }
+      ],
+      'team-resonance': [
+        { text: 'How connected do you feel with the team?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How valued do you feel in this group?', scale: [1, 2, 3, 4, 5] },
+        { text: 'How aligned are we on our goals?', scale: [1, 2, 3, 4, 5] }
+      ]
+    };
+
+    return questions[template] || questions['pulse-check'];
+  }
+
+  getTemplateTitle(template) {
+    const titles = {
+      'pulse-check': 'Pulse Check',
+      'focus-scan': 'Focus Scan',
+      'team-resonance': 'Team Resonance'
+    };
+    return titles[template] || 'Sociometry Test';
+  }
+
+  displayActiveSociometryTest() {
+    if (!this.activeSociometry || !this.currentTestQuestions.length) return;
+
+    this.activeSociometry.classList.remove('hidden');
+    this.displayCurrentQuestion();
+  }
+
+  displayCurrentQuestion() {
+    const question = this.currentTestQuestions[this.currentQuestionIndex];
+    if (!question) return;
+
+    if (this.testQuestion) {
+      this.testQuestion.textContent = question.text;
+    }
+
+    if (this.responseScale) {
+      this.responseScale.innerHTML = question.scale.map(value => `
+        <div class="scale-option" data-value="${value}">
+          ${value}
+        </div>
+      `).join('');
+    }
+
+    // Update progress
+    const progress = ((this.currentQuestionIndex + 1) / this.currentTestQuestions.length) * 100;
+    if (this.testProgressBar) {
+      this.testProgressBar.style.width = `${progress}%`;
+    }
+
+    this.selectedResponse = null;
+    if (this.nextQuestionBtn) {
+      this.nextQuestionBtn.disabled = true;
+      this.nextQuestionBtn.textContent = this.currentQuestionIndex === this.currentTestQuestions.length - 1 ? 'Complete Test' : 'Next Question';
+    }
+  }
+
+  handleScaleResponse(event) {
+    const scaleOption = event.target.closest('.scale-option');
+    if (!scaleOption) return;
+
+    // Clear previous selection
+    this.responseScale.querySelectorAll('.scale-option').forEach(option => {
+      option.classList.remove('selected');
+    });
+
+    // Select new response
+    scaleOption.classList.add('selected');
+    this.selectedResponse = parseInt(scaleOption.dataset.value);
+
+    if (this.nextQuestionBtn) {
+      this.nextQuestionBtn.disabled = false;
+    }
+  }
+
+  nextQuestion() {
+    if (this.selectedResponse === null) return;
+
+    // Store response
+    this.testResponses.push({
+      questionIndex: this.currentQuestionIndex,
+      question: this.currentTestQuestions[this.currentQuestionIndex].text,
+      response: this.selectedResponse,
+      timestamp: Date.now()
+    });
+
+    // Submit response to server
+    this.socket.emit('sociometry-response', {
+      roomToken: this.roomToken,
+      testId: this.currentSociometryTest.id,
+      participant: this.displayName,
+      questionIndex: this.currentQuestionIndex,
+      response: this.selectedResponse
+    });
+
+    // Move to next question or complete test
+    this.currentQuestionIndex++;
+
+    if (this.currentQuestionIndex < this.currentTestQuestions.length) {
+      this.displayCurrentQuestion();
+    } else {
+      this.completeTest();
+    }
+  }
+
+  completeTest() {
+    this.socket.emit('complete-sociometry', {
+      roomToken: this.roomToken,
+      testId: this.currentSociometryTest.id,
+      participant: this.displayName,
+      responses: this.testResponses,
+      completedAt: Date.now()
+    });
+
+    this.hideActiveSociometryTest();
+    this.showNotification('Test completed! Waiting for results...', 'success');
+  }
+
+  hideActiveSociometryTest() {
+    if (this.activeSociometry) {
+      this.activeSociometry.classList.add('hidden');
+    }
+  }
+
+  handleSociometryResponse(data) {
+    // Handle other participants' responses if needed
+    console.log('Sociometry response received:', data);
+  }
+
+  handleSociometryCompleted(data) {
+    this.showNotification(`${data.participant} completed the test`, 'info');
+  }
+
+  handleTestResults(resultsData) {
+    this.displayResults({
+      type: 'sociometry',
+      title: `${this.getTemplateTitle(resultsData.template)} Results`,
+      data: resultsData
+    });
+  }
+
+  // ==================== RESULTS DISPLAY SYSTEM ====================
+  displayResults(resultsConfig) {
+    if (!this.resultsPanel) return;
+
+    this.resultsPanel.classList.remove('hidden');
+
+    // Update title
+    const titleElement = this.resultsContent.querySelector('.results-header h2');
+    if (titleElement) {
+      titleElement.textContent = resultsConfig.title;
+    }
+
+    // Generate summary cards
+    if (this.resultsSummary) {
+      this.resultsSummary.innerHTML = this.generateResultsSummary(resultsConfig);
+    }
+
+    // Generate chart
+    if (this.resultsChart) {
+      this.resultsChart.innerHTML = this.generateResultsChart(resultsConfig);
+    }
+  }
+
+  generateResultsSummary(config) {
+    if (config.type === 'poll') {
+      const totalVotes = config.data.options.reduce((sum, opt) => sum + opt.votes, 0);
+      const topOption = config.data.options.reduce((max, opt) => opt.votes > max.votes ? opt : max, config.data.options[0]);
+
+      return `
+        <div class="result-card">
+          <div class="result-value">${totalVotes}</div>
+          <div class="result-label">Total Votes</div>
+        </div>
+        <div class="result-card">
+          <div class="result-value">${config.data.options.length}</div>
+          <div class="result-label">Options</div>
+        </div>
+        <div class="result-card">
+          <div class="result-value">${Math.round((topOption.votes / totalVotes) * 100) || 0}%</div>
+          <div class="result-label">Top Choice</div>
+        </div>
+      `;
+    } else if (config.type === 'sociometry') {
+      return `
+        <div class="result-card">
+          <div class="result-value">${config.data.participantCount}</div>
+          <div class="result-label">Participants</div>
+        </div>
+        <div class="result-card">
+          <div class="result-value">${config.data.averageScore.toFixed(1)}</div>
+          <div class="result-label">Average Score</div>
+        </div>
+        <div class="result-card">
+          <div class="result-value">${config.data.completionRate}%</div>
+          <div class="result-label">Completion Rate</div>
+        </div>
+      `;
+    }
+    return '';
+  }
+
+  generateResultsChart(config) {
+    if (config.type === 'poll') {
+      const maxVotes = Math.max(...config.data.options.map(opt => opt.votes));
+
+      return `
+        <div class="chart-title">Vote Distribution</div>
+        <div class="chart-bars">
+          ${config.data.options.map(option => `
+            <div class="chart-bar-item">
+              <div class="chart-bar-label">${option.text}</div>
+              <div class="chart-bar-container">
+                <div class="chart-bar-fill" style="width: ${maxVotes > 0 ? (option.votes / maxVotes) * 100 : 0}%"></div>
+                <span class="chart-bar-value">${option.votes}</span>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (config.type === 'sociometry') {
+      return `
+        <div class="chart-title">Response Patterns</div>
+        <div class="chart-content">
+          ${config.data.questionResults.map((result, index) => `
+            <div class="question-result">
+              <div class="question-title">Q${index + 1}: ${result.question}</div>
+              <div class="response-stats">
+                <div class="stat">Average: ${result.average.toFixed(1)}</div>
+                <div class="stat">Responses: ${result.responseCount}</div>
+              </div>
+              <div class="response-distribution">
+                ${[1,2,3,4,5].map(score => `
+                  <div class="response-bar">
+                    <span>${score}</span>
+                    <div class="bar" style="width: ${(result.distribution[score] || 0)}%"></div>
+                    <span>${result.distribution[score] || 0}%</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+    return '<div class="chart-title">No data available</div>';
+  }
+
+  hideResults() {
+    if (this.resultsPanel) {
+      this.resultsPanel.classList.add('hidden');
+    }
+  }
+
+  // ==================== ENHANCED RECONNECTION HANDLING ====================
+  updateConnectionStatus(status) {
+    this.connectionStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    this.connectionText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+    // Remove previous status classes and add new one
+    this.connectionIndicator.className = 'connection-indicator';
+    this.connectionIndicator.classList.add(status);
+
+    const statusMessages = {
+      connected: 'Connected',
+      connecting: 'Connecting...',
+      reconnecting: 'Reconnecting...',
+      disconnected: 'Disconnected',
+      error: 'Connection Error'
+    };
+
+    this.connectionText.textContent = statusMessages[status] || status;
+
+    // **FIX**: Ensure reconnection indicator properly clears after reconnection
+    if (status === 'connected' && this.connectionIndicator.classList.contains('reconnecting')) {
+      this.connectionIndicator.classList.remove('reconnecting');
+
+      // Brief delay to ensure UI update
+      setTimeout(() => {
+        this.connectionIndicator.classList.add('connected');
+      }, 100);
+    }
   }
 }
 

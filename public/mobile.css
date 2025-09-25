@@ -314,8 +314,8 @@ body {
 
 /* Chat bubble - LIKE TIKTOK, SEMI-TRANSPARENT ABOVE BOTTOM BAR */
 .chat-bubble {
-  position: absolute;
-  bottom: 100px;
+  position: fixed;
+  bottom: calc(120px + env(safe-area-inset-bottom, 0px));
   left: 20px;
   right: 20px;
   background: rgba(255, 255, 255, 0.15);
@@ -485,24 +485,27 @@ body {
   transform: scale(1.05);
 }
 
-/* Bottom controls - SINGLE CONTAINER WITH 5 BUTTONS, SMOOTHER */
+/* Bottom controls - SINGLE CONTAINER WITH 6 BUTTONS, SMOOTHER */
 .bottom-controls {
-  position: absolute;
+  position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 100px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 70%, transparent);
+  height: auto;
+  min-height: 100px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 80%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 0 20px 20px;
+  padding: 20px 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   z-index: 15;
   transition: transform 0.3s ease, opacity 0.3s ease;
   transform: translateY(0);
   opacity: 1;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .bottom-controls.hidden {
