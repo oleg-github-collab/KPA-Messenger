@@ -32,53 +32,51 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Initialize Redis with Railway environment variable
-const redis = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379',
-  socket: {
-    reconnectStrategy: (retries) => {
-      if (retries > 10) {
-        console.log('Redis: Max reconnection attempts reached');
-        return false; // Stop reconnecting
-      }
-      return Math.min(retries * 50, 1000); // Backoff strategy
-    }
-  }
-});
-
+// Initialize Redis client but don't connect immediately
+let redis = null;
 let isRedisConnected = false;
 
-redis.on('error', (err) => {
-  if (!isRedisConnected) {
-    console.error('⚠️  Redis connection failed. Please check REDIS_URL in environment variables.');
-    console.log('📖 See REDIS_SETUP.md for setup instructions');
-  }
-});
-
-redis.on('connect', () => {
-  isRedisConnected = true;
-  console.log('✅ Connected to Redis');
-});
-
-redis.on('ready', () => {
-  console.log('🚀 Redis is ready for operations');
-});
-
-// Connect to Redis with graceful error handling
-async function connectRedis() {
+// Only initialize Redis if URL is provided and looks valid
+if (process.env.REDIS_URL && !process.env.REDIS_URL.includes('localhost')) {
   try {
-    await redis.connect();
-    return true;
-  } catch (error) {
-    console.error('⚠️  Failed to connect to Redis. Server will continue with in-memory storage.');
-    console.log('📖 For production deployment, ensure Redis is available or set REDIS_URL correctly');
-    console.log('🔧 Running without Redis - data will not persist between restarts');
-    return false;
-  }
-}
+    redis = createClient({
+      url: process.env.REDIS_URL,
+      socket: {
+        reconnectStrategy: (retries) => {
+          if (retries > 5) {
+            console.log('🔴 Redis: Max reconnection attempts reached');
+            return false;
+          }
+          return Math.min(retries * 1000, 5000);
+        },
+        connectTimeout: 10000
+      }
+    });
 
-// Attempt Redis connection but don't block server startup
-const redisConnected = await connectRedis();
+    redis.on('error', (err) => {
+      console.error('⚠️ Redis error:', err.code);
+      isRedisConnected = false;
+    });
+
+    redis.on('connect', () => {
+      isRedisConnected = true;
+      console.log('✅ Connected to Redis');
+    });
+
+    redis.on('ready', () => {
+      console.log('🚀 Redis ready');
+    });
+
+    // Try to connect
+    await redis.connect();
+  } catch (error) {
+    console.error('⚠️ Failed to connect to Redis:', error.code);
+    redis = null;
+    isRedisConnected = false;
+  }
+} else {
+  console.log('🔧 Redis not configured - using in-memory storage');
+}
 
 // In-memory fallback storage for when Redis is unavailable
 let memoryStorage = {
@@ -95,7 +93,7 @@ let memoryStorage = {
 // Safe Redis wrapper that falls back to memory storage
 const SafeRedis = {
   async isConnected() {
-    return isRedisConnected && redis.isReady;
+    return redis && isRedisConnected && redis.isReady;
   },
 
   async hSet(key, data) {
@@ -177,7 +175,7 @@ const SafeRedis = {
       return await SafeRedis.expire(key, seconds);
     } else {
       // In memory storage doesn't support expiration, but that's okay for dev
-      console.log(`🕐 Would expire ${key} in ${seconds} seconds (memory mode)`);
+      // In memory mode - no expiration needed
       return 1;
     }
   },
@@ -604,26 +602,26 @@ if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
 }
 
 app.post('/auth', (req, res) => {
-  const { username, password } = req.body;
+  try {
+    const { username, password } = req.body;
 
-  // Detailed logging for debugging
-  console.log('🔐 Auth attempt:', {
-    username: username,
-    passwordLength: password ? password.length : 0,
-    hasSpecialChars: password ? /[^a-zA-Z0-9]/.test(password) : false
-  });
+    if (!username || !password) {
+      return res.status(400).json({ ok: false, message: 'Username and password required' });
+    }
 
-  const user = validCredentials.find(cred =>
-    cred.username === username && cred.password === password
-  );
+    const user = validCredentials.find(cred =>
+      cred.username === username && cred.password === password
+    );
 
-  if (user) {
-    console.log('✅ Auth successful for:', username);
-    const token = crypto.randomBytes(32).toString('hex');
-    res.json({ ok: true, username, token });
-  } else {
-    console.log('❌ Auth failed for:', username, 'Available users:', validCredentials.map(c => c.username));
-    res.status(401).json({ ok: false, message: 'Invalid credentials' });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      res.json({ ok: true, username, token });
+    } else {
+      res.status(401).json({ ok: false, message: 'Invalid credentials' });
+    }
+  } catch (error) {
+    console.error('Auth error:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
   }
 });
 
@@ -642,34 +640,26 @@ app.post('/api/meetings', async (req, res) => {
     const meetingUrl = `${req.protocol}://${req.get('host')}${basePath}?room=${roomToken}`;
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    // Try to store in Redis, but continue even if it fails
-    if (isRedisConnected) {
-      try {
+    // Store meeting data (Redis or in-memory fallback)
+    try {
+      if (redis && isRedisConnected) {
         await RedisHelper.createMeeting(roomToken, hostName || 'host');
-
-        // Store meeting creation context
         await RedisHelper.updateSession(roomToken, {
           createdBy: hostName || 'host',
           createdAt: new Date().toISOString(),
-          userAgent: req.headers['user-agent'],
-          createdFrom: req.headers['x-forwarded-for'] || req.connection.remoteAddress
+          userAgent: req.headers['user-agent']
         });
-      } catch (redisError) {
-        console.log('Redis storage failed, continuing with in-memory fallback');
       }
-    } else {
-      console.log('Redis not connected, using in-memory fallback for room:', roomToken);
+    } catch (error) {
+      // Fallback to in-memory storage handled by SafeRedis
     }
 
     res.json({
       ok: true,
       token: roomToken,
       meetingUrl,
-      mobileUrl: `${req.protocol}://${req.get('host')}/mobile.html?room=${roomToken}`,
-      desktopUrl: `${req.protocol}://${req.get('host')}/desktop.html?room=${roomToken}`,
       maxParticipants,
-      expiresAt,
-      redisStatus: isRedisConnected ? 'connected' : 'fallback'
+      expiresAt
     });
   } catch (error) {
     console.error('Error creating meeting:', error);

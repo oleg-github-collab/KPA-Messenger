@@ -2,142 +2,152 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Kaminskyi AI Messenger</title>
   <link rel="stylesheet" href="login.css">
 </head>
-<body class="auth-body">
-  <div class="language-switch floating" id="languageSelector">
-    <label for="languageChoice">Language / Мова</label>
+<body>
+  <!-- Language Selector -->
+  <div class="language-switch">
+    <label for="languageChoice">Language</label>
     <select id="languageChoice">
       <option value="en">English</option>
       <option value="uk">Українська</option>
     </select>
   </div>
 
-  <main class="auth-container">
-    <section class="card" id="loginCard">
-      <h1 id="title"></h1>
-      <p class="muted" id="subtitle"></p>
-      <form id="loginForm" class="stack-form" autocomplete="off">
-        <label for="username" id="usernameLabel"></label>
-        <input id="username" name="username" required placeholder="Oleh" autofocus>
+  <!-- Main Container -->
+  <div class="container">
+    <!-- Login Card -->
+    <div class="login-card" id="loginCard">
+      <div class="card-header">
+        <h1 id="title">Kaminskyi AI Messenger</h1>
+        <p id="subtitle">Secure video meetings and messaging</p>
+      </div>
 
-        <label for="password" id="passwordLabel"></label>
-        <input id="password" name="password" type="password" required placeholder="••••••">
+      <form id="loginForm" class="login-form">
+        <div class="form-group">
+          <label for="username" id="usernameLabel">Username</label>
+          <input id="username" name="username" type="text" required autofocus>
+        </div>
 
-        <button type="submit" class="primary" id="loginButton"></button>
+        <div class="form-group">
+          <label for="password" id="passwordLabel">Password</label>
+          <input id="password" name="password" type="password" required>
+        </div>
+
+        <button type="submit" class="btn-primary" id="loginButton">Sign In</button>
       </form>
-      <div id="loginError" class="error hidden"></div>
-    </section>
 
-    <section class="card hidden" id="dashboardCard">
-      <header class="card-header">
-        <div>
-          <h2 id="welcomeHeading"></h2>
-          <p class="muted" id="dashboardSubtitle"></p>
-        </div>
-        <button id="logoutBtn" class="ghost"></button>
-      </header>
+      <div id="loginError" class="error-message hidden"></div>
+    </div>
 
-      <div class="card-body">
-        <!-- Media Settings -->
-        <div class="media-settings">
-          <h3>Media Settings</h3>
-          <div class="media-options">
-            <label class="media-option">
-              <input type="checkbox" id="enableVideo" checked>
-              <span class="checkmark"></span>
-              <span class="option-text">Enable Video</span>
-              <div class="option-icon">📹</div>
-            </label>
+    <!-- Dashboard Card -->
+    <div class="dashboard-card hidden" id="dashboardCard">
+      <div class="card-header">
+        <h2 id="welcomeHeading">Welcome</h2>
+        <p id="dashboardSubtitle">Create and join video meetings</p>
+        <button id="logoutBtn" class="btn-logout">Sign Out</button>
+      </div>
 
-            <label class="media-option">
-              <input type="checkbox" id="enableAudio" checked>
-              <span class="checkmark"></span>
-              <span class="option-text">Enable Audio</span>
-              <div class="option-icon">🎤</div>
-            </label>
-          </div>
-        </div>
+      <div class="media-settings">
+        <h3>Media Settings</h3>
+        <div class="media-options">
+          <label class="media-option">
+            <input type="checkbox" id="enableVideo" checked>
+            <span class="checkbox-mark"></span>
+            <span class="option-text">Camera</span>
+            <span class="option-icon">📹</span>
+          </label>
 
-        <button id="createMeetingBtn" class="primary full-width"></button>
-
-        <div class="meeting-options" id="meetingOptions">
-          <label for="maxParticipants" id="capacityLabel"></label>
-          <input type="range" id="maxParticipants" min="2" max="10" value="10">
-          <div class="range-value" id="capacityValue"></div>
-        </div>
-
-        <div id="meetingBlock" class="meeting-block hidden">
-          <h3 id="meetingReadyHeading"></h3>
-          <p class="muted" id="meetingReadyText"></p>
-          <div class="link-row">
-            <input id="meetingLink" readonly>
-            <button id="copyMeetingBtn" class="ghost"></button>
-          </div>
-          <div class="actions-row">
-            <button id="openMeetingBtn" class="primary"></button>
-          </div>
-          <div id="meetingMessage" class="muted"></div>
+          <label class="media-option">
+            <input type="checkbox" id="enableAudio" checked>
+            <span class="checkbox-mark"></span>
+            <span class="option-text">Microphone</span>
+            <span class="option-icon">🎤</span>
+          </label>
         </div>
       </div>
-    </section>
-  </main>
+
+      <div class="meeting-controls">
+        <button id="createMeetingBtn" class="btn-primary">Create Meeting</button>
+
+        <div class="capacity-control">
+          <label for="maxParticipants" id="capacityLabel">Max Participants</label>
+          <input type="range" id="maxParticipants" min="2" max="10" value="10">
+          <span class="capacity-value" id="capacityValue">10 participants</span>
+        </div>
+      </div>
+
+      <div id="meetingBlock" class="meeting-result hidden">
+        <h3 id="meetingReadyHeading">Meeting Ready!</h3>
+        <p id="meetingReadyText">Share this link to invite participants</p>
+
+        <div class="link-container">
+          <input id="meetingLink" class="meeting-link" readonly>
+          <button id="copyMeetingBtn" class="btn-copy">Copy</button>
+        </div>
+
+        <div class="meeting-actions">
+          <button id="openMeetingBtn" class="btn-primary">Join Meeting</button>
+        </div>
+
+        <div id="meetingMessage" class="status-message"></div>
+      </div>
+    </div>
+  </div>
 
   <script>
     const translations = {
       en: {
         title: 'Kaminskyi AI Messenger',
-        subtitle: 'Sign in with your secure credentials to host a meeting.',
+        subtitle: 'Secure video meetings and messaging',
         usernameLabel: 'Username',
         passwordLabel: 'Password',
-        loginButton: 'Log In',
-        welcomeHeading: (user) => `Signed in as ${user}`,
-        dashboardSubtitle: 'Generate one-time meeting links and share them instantly.',
-        logout: 'Log out',
-        createMeeting: 'Create one-time meeting',
-        capacityLabel: 'Meeting capacity',
+        loginButton: 'Sign In',
+        welcomeHeading: (user) => `Welcome, ${user}`,
+        dashboardSubtitle: 'Create and join video meetings',
+        logout: 'Sign Out',
+        createMeeting: 'Create Meeting',
+        capacityLabel: 'Max Participants',
         capacityValue: (count) => `${count} participants`,
-        creating: 'Creating…',
-        meetingReadyHeading: 'Your meeting is ready',
-        meetingReadyText: 'Share this link with a participant. It stops working when the host ends the call.',
+        creating: 'Creating...',
+        meetingReadyHeading: 'Meeting Ready!',
+        meetingReadyText: 'Share this link to invite participants',
         copy: 'Copy',
-        openMeeting: 'Open meeting',
-        linkReady: 'Send this one-time link to your participant.',
+        openMeeting: 'Join Meeting',
         linkCopied: 'Link copied to clipboard!',
-        linkCopyError: 'Unable to copy automatically. Copy it manually.',
-        sessionExpired: 'Session expired. Please log in again.',
-        authError: 'Failed to authenticate.',
-        meetingError: 'Unable to create meeting.',
-        languageLabel: 'Language',
+        linkCopyError: 'Could not copy link',
+        sessionExpired: 'Session expired. Please sign in again.',
+        authError: 'Invalid username or password',
+        meetingError: 'Failed to create meeting'
       },
       uk: {
         title: 'Камінський AI Месенджер',
-        subtitle: 'Увійдіть за захищеними обліковими даними, щоб організувати зустріч.',
-        usernameLabel: 'Ім’я користувача',
+        subtitle: 'Захищені відеозустрічі та повідомлення',
+        usernameLabel: 'Користувач',
         passwordLabel: 'Пароль',
         loginButton: 'Увійти',
-        welcomeHeading: (user) => `Увійшли як ${user}`,
-        dashboardSubtitle: 'Створюйте одноразові посилання на зустріч і миттєво діліться ними.',
+        welcomeHeading: (user) => `Вітаємо, ${user}`,
+        dashboardSubtitle: 'Створюйте та приєднуйтесь до відеозустрічей',
         logout: 'Вийти',
-        createMeeting: 'Створити одноразову зустріч',
-        creating: 'Створення…',
-        meetingReadyHeading: 'Зустріч готова',
-        meetingReadyText: 'Надішліть посилання учаснику. Воно перестає працювати після завершення зустрічі хостом.',
-        copy: 'Скопіювати',
-        capacityLabel: 'Місткість зустрічі',
+        createMeeting: 'Створити зустріч',
+        capacityLabel: 'Макс. учасників',
         capacityValue: (count) => `${count} учасників`,
-        openMeeting: 'Відкрити зустріч',
-        linkReady: 'Надішліть це одноразове посилання учаснику.',
+        creating: 'Створення...',
+        meetingReadyHeading: 'Зустріч готова!',
+        meetingReadyText: 'Поділіться цим посиланням щоб запросити учасників',
+        copy: 'Копіювати',
+        openMeeting: 'Приєднатися',
         linkCopied: 'Посилання скопійовано!',
-        linkCopyError: 'Не вдалося скопіювати автоматично. Скопіюйте вручну.',
-        sessionExpired: 'Сеанс завершено. Увійдіть ще раз.',
-        authError: 'Не вдалося авторизуватися.',
-        meetingError: 'Не вдалося створити зустріч.',
-        languageLabel: 'Мова',
-      },
+        linkCopyError: 'Не вдалось скопіювати посилання',
+        sessionExpired: 'Сесія закінчилась. Увійдіть знову.',
+        authError: 'Неправильний логін або пароль',
+        meetingError: 'Не вдалось створити зустріч'
+      }
     };
 
+    // DOM Elements
     const loginForm = document.getElementById('loginForm');
     const loginCard = document.getElementById('loginCard');
     const dashboardCard = document.getElementById('dashboardCard');
@@ -151,11 +161,10 @@
     const openMeetingBtn = document.getElementById('openMeetingBtn');
     const meetingMessage = document.getElementById('meetingMessage');
     const maxParticipantsInput = document.getElementById('maxParticipants');
-    const capacityLabel = document.getElementById('capacityLabel');
     const capacityValue = document.getElementById('capacityValue');
     const langSelect = document.getElementById('languageChoice');
-    const langLabel = document.querySelector("label[for='languageChoice']");
 
+    // Language Management
     let currentLang = localStorage.getItem('kaminskyi-lang') || 'en';
     if (!translations[currentLang]) currentLang = 'en';
     langSelect.value = currentLang;
@@ -166,11 +175,10 @@
     }
 
     function updateCapacityDisplay() {
-      const value = Number(maxParticipantsInput.value);
-      capacityValue.textContent = translations[currentLang].capacityValue(value);
+      capacityValue.textContent = t('capacityValue', parseInt(maxParticipantsInput.value));
     }
 
-    function applyStaticText() {
+    function applyTranslations() {
       document.documentElement.lang = currentLang;
       document.title = t('title');
       document.getElementById('title').textContent = t('title');
@@ -181,92 +189,108 @@
       document.getElementById('dashboardSubtitle').textContent = t('dashboardSubtitle');
       logoutBtn.textContent = t('logout');
       createMeetingBtn.textContent = t('createMeeting');
-      capacityLabel.textContent = t('capacityLabel');
+      document.getElementById('capacityLabel').textContent = t('capacityLabel');
       updateCapacityDisplay();
       document.getElementById('meetingReadyHeading').textContent = t('meetingReadyHeading');
       document.getElementById('meetingReadyText').textContent = t('meetingReadyText');
       copyMeetingBtn.textContent = t('copy');
       openMeetingBtn.textContent = t('openMeeting');
-      langLabel.textContent = `${t('languageLabel')} / Language`;
     }
 
     function setLanguage(lang) {
       if (!translations[lang]) return;
       currentLang = lang;
       localStorage.setItem('kaminskyi-lang', lang);
-      applyStaticText();
+      applyTranslations();
     }
 
-    langSelect.addEventListener('change', (event) => {
-      setLanguage(event.target.value);
-      if (sessionStorage.getItem('username')) {
-        welcomeHeading.textContent = t('welcomeHeading', sessionStorage.getItem('username'));
+    langSelect.addEventListener('change', (e) => {
+      setLanguage(e.target.value);
+      const username = sessionStorage.getItem('username');
+      if (username) {
+        welcomeHeading.textContent = t('welcomeHeading', username);
       }
     });
 
-    function setAuthState(username, token) {
-      if (username && token) {
-        sessionStorage.setItem('authToken', token);
-        sessionStorage.setItem('username', username);
-        showDashboard();
-      } else {
-        sessionStorage.removeItem('authToken');
-        sessionStorage.removeItem('username');
-        meetingBlock.classList.add('hidden');
-        loginCard.classList.remove('hidden');
-        dashboardCard.classList.add('hidden');
-        loginForm.reset();
-        if (username) {
-          document.getElementById('username').value = username;
-        }
-      }
+    // Authentication
+    function showError(message) {
+      loginError.textContent = message;
+      loginError.classList.remove('hidden');
+      setTimeout(() => loginError.classList.add('hidden'), 5000);
     }
 
     function showDashboard() {
       const username = sessionStorage.getItem('username');
       if (!username) return;
+
       welcomeHeading.textContent = t('welcomeHeading', username);
       loginCard.classList.add('hidden');
       dashboardCard.classList.remove('hidden');
-      loginError.classList.add('hidden');
       meetingBlock.classList.add('hidden');
       meetingMessage.textContent = '';
+    }
+
+    function showLogin() {
+      sessionStorage.removeItem('authToken');
+      sessionStorage.removeItem('username');
+      loginCard.classList.remove('hidden');
+      dashboardCard.classList.add('hidden');
+      loginForm.reset();
     }
 
     async function handleLogin(event) {
       event.preventDefault();
       loginError.classList.add('hidden');
+
       const formData = new FormData(loginForm);
-      const payload = {
-        username: formData.get('username'),
-        password: formData.get('password'),
+      const credentials = {
+        username: formData.get('username').trim(),
+        password: formData.get('password')
       };
+
+      if (!credentials.username || !credentials.password) {
+        showError('Please fill in all fields');
+        return;
+      }
+
+      const submitBtn = document.getElementById('loginButton');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in...';
 
       try {
         const response = await fetch('/auth', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(credentials)
         });
 
         const data = await response.json();
-        if (!response.ok || !data.ok) {
+
+        if (response.ok && data.ok) {
+          sessionStorage.setItem('authToken', data.token);
+          sessionStorage.setItem('username', data.username);
+          showDashboard();
+        } else {
           throw new Error(data.message || t('authError'));
         }
-
-        setAuthState(data.username, data.token);
       } catch (error) {
-        loginError.textContent = error.message || t('authError');
-        loginError.classList.remove('hidden');
+        console.error('Login error:', error);
+        showError(error.message || t('authError'));
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = t('loginButton');
       }
     }
 
+    // Meeting Management
     async function createMeeting() {
       const token = sessionStorage.getItem('authToken');
       if (!token) {
-        loginError.textContent = t('sessionExpired');
-        loginError.classList.remove('hidden');
-        setAuthState();
+        showError(t('sessionExpired'));
+        showLogin();
         return;
       }
 
@@ -275,26 +299,30 @@
       meetingMessage.textContent = '';
 
       try {
-        const capacity = Number(maxParticipantsInput.value);
         const response = await fetch('/api/meetings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
           },
-          body: JSON.stringify({ maxParticipants: capacity }),
+          body: JSON.stringify({
+            maxParticipants: parseInt(maxParticipantsInput.value)
+          })
         });
 
         const data = await response.json();
-        if (!response.ok || !data.ok) {
+
+        if (response.ok && data.ok) {
+          meetingLinkInput.value = data.meetingUrl;
+          openMeetingBtn.dataset.roomToken = data.token;
+          meetingBlock.classList.remove('hidden');
+          meetingMessage.textContent = `Ready for ${t('capacityValue', data.maxParticipants || 10)}`;
+        } else {
           throw new Error(data.message || t('meetingError'));
         }
-
-        meetingLinkInput.value = data.meetingUrl;
-        meetingBlock.classList.remove('hidden');
-        meetingMessage.textContent = `${t('linkReady')} ${translations[currentLang].capacityValue(capacity)}`;
-        openMeetingBtn.dataset.roomToken = data.token;
       } catch (error) {
+        console.error('Meeting creation error:', error);
         meetingMessage.textContent = error.message || t('meetingError');
         meetingBlock.classList.remove('hidden');
       } finally {
@@ -306,16 +334,20 @@
     function copyMeetingLink() {
       const link = meetingLinkInput.value;
       if (!link) return;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+
+      if (navigator.clipboard) {
         navigator.clipboard.writeText(link)
-          .then(() => {
-            meetingMessage.textContent = t('linkCopied');
-          })
-          .catch(() => {
-            meetingMessage.textContent = t('linkCopyError');
-          });
+          .then(() => meetingMessage.textContent = t('linkCopied'))
+          .catch(() => meetingMessage.textContent = t('linkCopyError'));
       } else {
-        meetingMessage.textContent = t('linkCopyError');
+        // Fallback for older browsers
+        meetingLinkInput.select();
+        try {
+          document.execCommand('copy');
+          meetingMessage.textContent = t('linkCopied');
+        } catch {
+          meetingMessage.textContent = t('linkCopyError');
+        }
       }
     }
 
@@ -323,35 +355,46 @@
       const token = openMeetingBtn.dataset.roomToken;
       if (!token) return;
 
-      // Store media preferences in sessionStorage
+      // Store media preferences
       const enableVideo = document.getElementById('enableVideo').checked;
       const enableAudio = document.getElementById('enableAudio').checked;
 
       sessionStorage.setItem('enableVideo', enableVideo.toString());
       sessionStorage.setItem('enableAudio', enableAudio.toString());
 
-      console.log('💾 Stored media preferences:', { video: enableVideo, audio: enableAudio });
-
+      // Navigate to meeting
       window.location.href = `/chat.html?room=${encodeURIComponent(token)}`;
     }
 
+    // Event Listeners
     loginForm.addEventListener('submit', handleLogin);
-    logoutBtn.addEventListener('click', () => {
-      setAuthState();
-    });
+    logoutBtn.addEventListener('click', showLogin);
     createMeetingBtn.addEventListener('click', createMeeting);
     copyMeetingBtn.addEventListener('click', copyMeetingLink);
     openMeetingBtn.addEventListener('click', openMeeting);
     maxParticipantsInput.addEventListener('input', updateCapacityDisplay);
 
-    (function bootstrap() {
-      applyStaticText();
+    // Initialize
+    function init() {
+      applyTranslations();
+
+      // Check existing session
       const token = sessionStorage.getItem('authToken');
       const username = sessionStorage.getItem('username');
+
       if (token && username) {
         showDashboard();
+      } else {
+        showLogin();
       }
-    })();
+    }
+
+    // Start app when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
