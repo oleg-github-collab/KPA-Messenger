@@ -36,49 +36,61 @@ const openai = new OpenAI({
 let redis = null;
 let isRedisConnected = false;
 
-// Only initialize Redis if URL is provided and looks valid
-if (process.env.REDIS_URL && !process.env.REDIS_URL.includes('localhost')) {
-  try {
-    redis = createClient({
-      url: process.env.REDIS_URL,
-      socket: {
-        reconnectStrategy: (retries) => {
-          if (retries > 5) {
-            console.log('🔴 Redis: Max reconnection attempts reached');
-            return false;
-          }
-          return Math.min(retries * 1000, 5000);
-        },
-        connectTimeout: 10000
-      }
-    });
+// Initialize Redis with proper error handling
+async function initializeRedis() {
+  if (process.env.REDIS_URL && !process.env.REDIS_URL.includes('localhost')) {
+    try {
+      redis = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          reconnectStrategy: (retries) => {
+            if (retries > 5) {
+              console.log('🔴 Redis: Max reconnection attempts reached');
+              return false;
+            }
+            return Math.min(retries * 1000, 5000);
+          },
+          connectTimeout: 10000
+        }
+      });
 
-    redis.on('error', (err) => {
-      console.error('⚠️ Redis error:', err.code);
+      redis.on('error', (err) => {
+        console.error('⚠️ Redis error:', err.code);
+        isRedisConnected = false;
+      });
+
+      redis.on('connect', () => {
+        isRedisConnected = true;
+        console.log('✅ Connected to Redis');
+      });
+
+      redis.on('ready', () => {
+        console.log('🚀 Redis ready');
+      });
+
+      redis.on('disconnect', () => {
+        isRedisConnected = false;
+        console.log('🔴 Redis disconnected');
+      });
+
+      await redis.connect();
+    } catch (error) {
+      console.error('⚠️ Failed to connect to Redis:', error.code || error.message);
+      redis = null;
       isRedisConnected = false;
-    });
-
-    redis.on('connect', () => {
-      isRedisConnected = true;
-      console.log('✅ Connected to Redis');
-    });
-
-    redis.on('ready', () => {
-      console.log('🚀 Redis ready');
-    });
-
-    // Try to connect
-    await redis.connect();
-  } catch (error) {
-    console.error('⚠️ Failed to connect to Redis:', error.code);
-    redis = null;
-    isRedisConnected = false;
+    }
+  } else {
+    console.log('🔧 Redis not configured - using in-memory storage');
   }
-} else {
-  console.log('🔧 Redis not configured - using in-memory storage');
 }
 
-// In-memory fallback storage for when Redis is unavailable
+// Initialize Redis asynchronously
+initializeRedis().catch(console.error);
+
+// In-memory fallback storage with size limits and cleanup
+const MAX_MEMORY_ITEMS = 1000;
+const MEMORY_CLEANUP_INTERVAL = 300000; // 5 minutes
+
 let memoryStorage = {
   meetings: new Map(),
   participants: new Map(),
@@ -90,6 +102,53 @@ let memoryStorage = {
   roomHosts: new Map()
 };
 
+// Memory cleanup utility
+function cleanupMemoryStorage() {
+  const now = Date.now();
+  const HOUR_MS = 60 * 60 * 1000;
+
+  // Clean expired meetings
+  for (const [key, value] of memoryStorage.meetings.entries()) {
+    if (value.expiresAt && new Date(value.expiresAt) < new Date()) {
+      memoryStorage.meetings.delete(key);
+      memoryStorage.participants.delete(key);
+      memoryStorage.messages.delete(key);
+      memoryStorage.sessions.delete(key);
+      memoryStorage.polls.delete(key);
+      memoryStorage.emotions.delete(key);
+      memoryStorage.roomHosts.delete(key);
+      memoryStorage.activeRooms.delete(key);
+    }
+  }
+
+  // Limit storage sizes
+  const limitStorageSize = (storage, limit = MAX_MEMORY_ITEMS) => {
+    if (storage.size > limit) {
+      const entries = Array.from(storage.entries());
+      const toDelete = entries.slice(0, entries.length - limit);
+      toDelete.forEach(([key]) => storage.delete(key));
+    }
+  };
+
+  limitStorageSize(memoryStorage.meetings);
+  limitStorageSize(memoryStorage.participants);
+  limitStorageSize(memoryStorage.messages);
+  limitStorageSize(memoryStorage.sessions);
+  limitStorageSize(memoryStorage.polls);
+  limitStorageSize(memoryStorage.emotions);
+  limitStorageSize(memoryStorage.roomHosts);
+
+  // Limit active rooms
+  if (memoryStorage.activeRooms.size > MAX_MEMORY_ITEMS) {
+    const roomsArray = Array.from(memoryStorage.activeRooms);
+    const toDelete = roomsArray.slice(0, roomsArray.length - MAX_MEMORY_ITEMS);
+    toDelete.forEach(room => memoryStorage.activeRooms.delete(room));
+  }
+}
+
+// Run memory cleanup periodically
+setInterval(cleanupMemoryStorage, MEMORY_CLEANUP_INTERVAL);
+
 // Safe Redis wrapper that falls back to memory storage
 const SafeRedis = {
   async isConnected() {
@@ -98,7 +157,7 @@ const SafeRedis = {
 
   async hSet(key, data) {
     if (await this.isConnected()) {
-      return await SafeRedis.hSet(key, data);
+      return await redis.hSet(key, data);
     } else {
       // Fallback to memory
       memoryStorage.meetings.set(key, data);
@@ -108,7 +167,7 @@ const SafeRedis = {
 
   async hGetAll(key) {
     if (await this.isConnected()) {
-      return await SafeRedis.hGetAll(key);
+      return await redis.hGetAll(key);
     } else {
       // Fallback to memory
       return memoryStorage.meetings.get(key) || {};
@@ -117,7 +176,7 @@ const SafeRedis = {
 
   async set(key, value) {
     if (await this.isConnected()) {
-      return await SafeRedis.set(key, value);
+      return await redis.set(key, value);
     } else {
       // Fallback to memory
       memoryStorage.sessions.set(key, value);
@@ -127,7 +186,7 @@ const SafeRedis = {
 
   async get(key) {
     if (await this.isConnected()) {
-      return await SafeRedis.get(key);
+      return await redis.get(key);
     } else {
       // Fallback to memory
       return memoryStorage.sessions.get(key) || null;
@@ -136,7 +195,7 @@ const SafeRedis = {
 
   async sAdd(key, member) {
     if (await this.isConnected()) {
-      return await SafeRedis.sAdd(key, member);
+      return await redis.sAdd(key, member);
     } else {
       // Fallback to memory
       if (key.includes('active_rooms')) {
@@ -148,7 +207,7 @@ const SafeRedis = {
 
   async sRem(key, member) {
     if (await this.isConnected()) {
-      return await SafeRedis.sRem(key, member);
+      return await redis.sRem(key, member);
     } else {
       // Fallback to memory
       if (key.includes('active_rooms')) {
@@ -160,7 +219,7 @@ const SafeRedis = {
 
   async sMembers(key) {
     if (await this.isConnected()) {
-      return await SafeRedis.sMembers(key);
+      return await redis.sMembers(key);
     } else {
       // Fallback to memory
       if (key.includes('active_rooms')) {
@@ -172,7 +231,7 @@ const SafeRedis = {
 
   async expire(key, seconds) {
     if (await this.isConnected()) {
-      return await SafeRedis.expire(key, seconds);
+      return await redis.expire(key, seconds);
     } else {
       // In memory storage doesn't support expiration, but that's okay for dev
       // In memory mode - no expiration needed
@@ -182,7 +241,7 @@ const SafeRedis = {
 
   async del(keys) {
     if (await this.isConnected()) {
-      return await SafeRedis.del(keys);
+      return await redis.del(keys);
     } else {
       // Fallback to memory cleanup
       let deletedCount = 0;
@@ -198,7 +257,7 @@ const SafeRedis = {
 
   async lPush(key, value) {
     if (await this.isConnected()) {
-      return await SafeRedis.lPush(key, value);
+      return await redis.lPush(key, value);
     } else {
       // Fallback to memory
       if (!memoryStorage.messages.has(key)) {
@@ -304,8 +363,8 @@ const RedisHelper = {
     ];
 
     await Promise.all([
-      redis.del(keys),
-      redis.sRem(RedisKeys.activeRooms(), token)
+      SafeRedis.del(keys),
+      SafeRedis.sRem(RedisKeys.activeRooms(), token)
     ]);
   },
 
@@ -326,7 +385,7 @@ const RedisHelper = {
 
   async removeParticipant(token, participantName) {
     await SafeRedis.sRem(RedisKeys.participants(token), participantName);
-    await SafeRedis.del(RedisKeys.participant(token, participantName));
+    await SafeRedis.del([RedisKeys.participant(token, participantName)]);
   },
 
   async getParticipants(token) {
@@ -721,38 +780,57 @@ async function webSearch(query) {
 
 async function askAI(query, useWebSearch = false, context = null) {
   try {
+    // Limit input size to prevent memory issues
+    if (query.length > 2000) {
+      query = query.substring(0, 2000) + "...";
+    }
+
     let systemPrompt = `You are Valera, an AI assistant for Kaminskyi AI Messenger. You help with video calls, team dynamics, and general questions.
     Be helpful, concise, and professional. Respond in the same language as the user's question.`;
 
     let userMessage = query;
+    let searchResults = [];
 
     if (useWebSearch) {
-      const searchResults = await webSearch(query);
+      searchResults = await webSearch(query);
       if (searchResults.length > 0) {
-        userMessage += `\n\nWeb search results:\n${searchResults.map(r => `- ${r.title}: ${r.snippet}`).join('\n')}`;
+        const searchText = searchResults.map(r => `- ${r.title}: ${r.snippet}`).join('\n');
+        if (searchText.length > 1000) {
+          userMessage += `\n\nWeb search results:\n${searchText.substring(0, 1000)}...`;
+        } else {
+          userMessage += `\n\nWeb search results:\n${searchText}`;
+        }
       }
     }
 
     if (context) {
-      systemPrompt += `\n\nMeeting context: ${JSON.stringify(context)}`;
+      const contextStr = JSON.stringify(context);
+      if (contextStr.length > 500) {
+        systemPrompt += `\n\nMeeting context: ${contextStr.substring(0, 500)}...`;
+      } else {
+        systemPrompt += `\n\nMeeting context: ${contextStr}`;
+      }
     }
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      temperature: 0.7,
-      max_tokens: 1000
-    });
+    const completion = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage }
+        ],
+        temperature: 0.7,
+        max_tokens: 500 // Reduced to prevent large responses
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000))
+    ]);
 
     return {
       response: completion.choices[0].message.content,
-      sources: useWebSearch ? await webSearch(query) : []
+      sources: searchResults
     };
   } catch (error) {
-    console.error('AI Assistant error:', error);
+    console.error('AI Assistant error:', error.message || error);
     return {
       response: "Sorry, I'm having trouble processing your request right now. Please try again later.",
       sources: []
@@ -761,7 +839,36 @@ async function askAI(query, useWebSearch = false, context = null) {
 }
 
 // Enhanced Socket.IO with all features
+const MAX_ROOMS = 100;
 const rooms = new Map();
+
+// Clean up old rooms periodically
+function cleanupRooms() {
+  const now = Date.now();
+  const ROOM_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours
+
+  for (const [token, room] of rooms.entries()) {
+    // Remove rooms with no participants for more than 10 minutes
+    if (room.participants.size === 0 && (now - room.lastActivity) > 600000) {
+      rooms.delete(token);
+      continue;
+    }
+
+    // Remove very old rooms
+    if (room.createdAt && (now - room.createdAt) > ROOM_TIMEOUT) {
+      rooms.delete(token);
+    }
+  }
+
+  // Limit total rooms
+  if (rooms.size > MAX_ROOMS) {
+    const roomsArray = Array.from(rooms.entries());
+    const toDelete = roomsArray.slice(0, roomsArray.length - MAX_ROOMS);
+    toDelete.forEach(([token]) => rooms.delete(token));
+  }
+}
+
+setInterval(cleanupRooms, 10 * 60 * 1000); // Every 10 minutes
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -815,11 +922,14 @@ io.on('connection', (socket) => {
           participants: new Map(),
           polls: new Map(),
           emotions: new Map(),
-          tests: new Map()
+          tests: new Map(),
+          createdAt: Date.now(),
+          lastActivity: Date.now()
         });
       }
 
       const room = rooms.get(roomToken);
+      room.lastActivity = Date.now(); // Update activity
       room.participants.set(socket.id, {
         id: socket.id,
         displayName,
@@ -851,31 +961,46 @@ io.on('connection', (socket) => {
     }
   });
 
-  // WebRTC signaling
+  // WebRTC signaling with memory optimization
   socket.on('offer', (data) => {
-    socket.to(data.targetId).emit('offer', {
-      offer: data.offer,
-      from: socket.id
-    });
+    if (currentRoom && data.targetId && data.offer) {
+      const room = rooms.get(currentRoom);
+      if (room) room.lastActivity = Date.now();
+
+      socket.to(data.targetId).emit('offer', {
+        offer: data.offer,
+        from: socket.id
+      });
+    }
   });
 
   socket.on('answer', (data) => {
-    socket.to(data.targetId).emit('answer', {
-      answer: data.answer,
-      from: socket.id
-    });
+    if (currentRoom && data.targetId && data.answer) {
+      const room = rooms.get(currentRoom);
+      if (room) room.lastActivity = Date.now();
+
+      socket.to(data.targetId).emit('answer', {
+        answer: data.answer,
+        from: socket.id
+      });
+    }
   });
 
   socket.on('ice-candidate', (data) => {
-    socket.to(data.targetId).emit('ice-candidate', {
-      candidate: data.candidate,
-      from: socket.id
-    });
+    if (currentRoom && data.targetId && data.candidate) {
+      const room = rooms.get(currentRoom);
+      if (room) room.lastActivity = Date.now();
+
+      socket.to(data.targetId).emit('ice-candidate', {
+        candidate: data.candidate,
+        from: socket.id
+      });
+    }
   });
 
   // Enhanced chat system
   socket.on('chat-message', async (data) => {
-    const { roomToken, message, from, timestamp } = data;
+    const { roomToken, message, from } = data;
 
     try {
       const meeting = await RedisHelper.getMeeting(roomToken);
@@ -895,7 +1020,7 @@ io.on('connection', (socket) => {
 
   // AI Assistant with GPT-4o
   socket.on('assistant-query', async (data) => {
-    const { roomToken, query, from, webSearch, timestamp } = data;
+    const { roomToken, query, from, webSearch } = data;
     const startTime = Date.now();
 
     try {
@@ -1011,7 +1136,7 @@ io.on('connection', (socket) => {
 
   // Emotional feedback system
   socket.on('emotion-update', async (data) => {
-    const { roomToken, emotion, intensity, context } = data;
+    const { roomToken, emotion, intensity } = data;
 
     try {
       const meeting = await RedisHelper.getMeeting(roomToken);
@@ -1148,7 +1273,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('leave-room', async (data) => {
+  socket.on('leave-room', async () => {
     if (currentRoom && currentUser) {
       try {
         // Remove participant and log leaving
@@ -1178,30 +1303,6 @@ io.on('connection', (socket) => {
 });
 
 // Utility functions
-function calculateEmotionalClimate(emotions) {
-  if (!emotions.length) return { overall: 'neutral', distribution: {} };
-
-  const distribution = {};
-  emotions.forEach(({ emotion, intensity }) => {
-    distribution[emotion] = (distribution[emotion] || 0) + (intensity || 1);
-  });
-
-  const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
-  const percentages = {};
-  Object.entries(distribution).forEach(([emotion, count]) => {
-    percentages[emotion] = Math.round((count / total) * 100);
-  });
-
-  // Determine overall climate
-  const dominant = Object.entries(percentages)
-    .sort(([,a], [,b]) => b - a)[0];
-
-  return {
-    overall: dominant ? dominant[0] : 'neutral',
-    distribution: percentages,
-    participantCount: emotions.length
-  };
-}
 
 function analyzeSociometricResults(responses) {
   const participants = Object.keys(responses);
@@ -1253,8 +1354,42 @@ validCredentials.forEach((cred, index) => {
   console.log(`   ${index + 1}. Username: "${cred.username}" | Password: "${cred.password}"`);
 });
 
+// Process optimization for production
+if (process.env.NODE_ENV === 'production') {
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err.message);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+  });
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+
+  if (redis && isRedisConnected) {
+    try {
+      await redis.quit();
+      console.log('Redis connection closed');
+    } catch (error) {
+      console.error('Error closing Redis:', error);
+    }
+  }
+
+  server.close(() => {
+    console.log('HTTP server closed');
+    process.exit(0);
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`AI Assistant powered by GPT-4o: ${process.env.OPENAI_API_KEY ? 'Ready' : 'Missing API key'}`);
+  console.log(`Memory management: Active with ${MAX_MEMORY_ITEMS} item limits`);
+  console.log(`Room management: Active with ${MAX_ROOMS} room limits`);
 });
