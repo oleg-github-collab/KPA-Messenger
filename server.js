@@ -34,19 +34,43 @@ const openai = new OpenAI({
 
 // Initialize Redis with Railway environment variable
 const redis = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
+  url: process.env.REDIS_URL || 'redis://localhost:6379',
+  socket: {
+    reconnectStrategy: (retries) => {
+      if (retries > 10) {
+        console.log('Redis: Max reconnection attempts reached');
+        return false; // Stop reconnecting
+      }
+      return Math.min(retries * 50, 1000); // Backoff strategy
+    }
+  }
 });
 
+let isRedisConnected = false;
+
 redis.on('error', (err) => {
-  console.error('Redis connection error:', err);
+  if (!isRedisConnected) {
+    console.error('⚠️  Redis connection failed. Please check REDIS_URL in environment variables.');
+    console.log('📖 See REDIS_SETUP.md for setup instructions');
+  }
 });
 
 redis.on('connect', () => {
-  console.log('Connected to Redis');
+  isRedisConnected = true;
+  console.log('✅ Connected to Redis');
 });
 
-// Connect to Redis
-await redis.connect();
+redis.on('ready', () => {
+  console.log('🚀 Redis is ready for operations');
+});
+
+// Connect to Redis with error handling
+try {
+  await redis.connect();
+} catch (error) {
+  console.error('⚠️  Failed to connect to Redis. Server will continue but with limited functionality.');
+  console.log('📖 Check REDIS_SETUP.md for setup instructions');
+}
 
 // Redis utility functions for session data management
 const RedisKeys = {
@@ -618,9 +642,9 @@ io.on('connection', (socket) => {
       });
 
       // Send current room state
-      const participants = Array.from(room.participants.values());
+      const roomParticipants = Array.from(room.participants.values());
       socket.emit('room-state', {
-        participants,
+        participants: roomParticipants,
         polls: Array.from(room.polls.values()),
         emotionalClimate: room.emotions,
         activeTests: Array.from(room.tests.values()).filter(test => test.status === 'active')
