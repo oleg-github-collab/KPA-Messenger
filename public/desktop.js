@@ -337,58 +337,54 @@ class DesktopVideoCall {
 
   async initializeMedia() {
     try {
-      // Get media preferences from login page
-      const enableVideo = this.getMediaPreference('enableVideo');
-      const enableAudio = this.getMediaPreference('enableAudio');
+      console.log('🎬 Starting media initialization...');
 
-      console.log('🎥 Media preferences:', { video: enableVideo, audio: enableAudio });
-
-      const constraints = {};
-
-      // Only request video if enabled
-      if (enableVideo) {
-        constraints.video = {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
-        };
-      }
-
-      // Only request audio if enabled
-      if (enableAudio) {
-        constraints.audio = {
+      // Request both video and audio by default for video calling
+      const constraints = {
+        video: {
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
+          facingMode: 'user',
+          frameRate: { ideal: 30, min: 15 }
+        },
+        audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          sampleRate: 44100
-        };
-      }
+          sampleRate: { ideal: 48000 }
+        }
+      };
 
-      // If no media is enabled, create an empty stream
-      if (!enableVideo && !enableAudio) {
-        console.log('📺 No media requested, creating empty stream');
-        this.localStream = new MediaStream();
-        this.isVideoEnabled = false;
-        this.isAudioEnabled = false;
-      } else {
-        console.log('🎬 Requesting media with constraints:', constraints);
-        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        this.isVideoEnabled = enableVideo && this.localStream.getVideoTracks().length > 0;
-        this.isAudioEnabled = enableAudio && this.localStream.getAudioTracks().length > 0;
-      }
+      console.log('🎥 Requesting user media...');
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Set video source and handle placeholder
+      // Check what we actually got
+      const videoTracks = this.localStream.getVideoTracks();
+      const audioTracks = this.localStream.getAudioTracks();
+
+      this.isVideoEnabled = videoTracks.length > 0;
+      this.isAudioEnabled = audioTracks.length > 0;
+
+      console.log('✅ Media stream obtained:', {
+        video: this.isVideoEnabled,
+        audio: this.isAudioEnabled,
+        videoTracks: videoTracks.length,
+        audioTracks: audioTracks.length
+      });
+
+      // Set video source
       if (this.isVideoEnabled) {
         this.localVideo.srcObject = this.localStream;
+        this.localVideo.muted = true; // Prevent audio feedback
         this.localPlaceholder.style.display = 'none';
-        console.log('✅ Video enabled and connected');
+        console.log('📹 Video stream connected to local video element');
       } else {
         this.localVideo.srcObject = null;
         this.localPlaceholder.style.display = 'flex';
-        console.log('📷 Video disabled, showing placeholder');
+        console.log('📷 No video track, showing placeholder');
       }
 
-      // Update UI to reflect actual media state
+      // Update UI controls
       this.updateMediaControlsUI();
 
       // Add self to participant list

@@ -152,57 +152,55 @@ class MobileVideoCall {
 
   async initializeMedia() {
     try {
-      // Get media preferences from login page
-      const enableVideo = this.getMediaPreference('enableVideo');
-      const enableAudio = this.getMediaPreference('enableAudio');
+      console.log('🎬 Starting mobile media initialization...');
 
-      console.log('🎥 Mobile media preferences:', { video: enableVideo, audio: enableAudio });
-
-      const constraints = {};
-
-      // Only request video if enabled
-      if (enableVideo) {
-        constraints.video = {
+      // Mobile-optimized constraints
+      const constraints = {
+        video: {
           facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        };
-      }
-
-      // Only request audio if enabled
-      if (enableAudio) {
-        constraints.audio = {
+          width: { ideal: 640, min: 320 },
+          height: { ideal: 480, min: 240 },
+          frameRate: { ideal: 24, min: 15 }
+        },
+        audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        };
-      }
+          autoGainControl: true,
+          sampleRate: { ideal: 44100 }
+        }
+      };
 
-      // If no media is enabled, create an empty stream
-      if (!enableVideo && !enableAudio) {
-        console.log('📺 No media requested, creating empty stream');
-        this.localStream = new MediaStream();
-        this.isVideoEnabled = false;
-        this.isAudioEnabled = false;
-      } else {
-        console.log('🎬 Requesting mobile media with constraints:', constraints);
-        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        this.isVideoEnabled = enableVideo && this.localStream.getVideoTracks().length > 0;
-        this.isAudioEnabled = enableAudio && this.localStream.getAudioTracks().length > 0;
-      }
+      console.log('🎥 Mobile requesting user media...');
+      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Set video source and handle placeholder
+      // Check what we actually got
+      const videoTracks = this.localStream.getVideoTracks();
+      const audioTracks = this.localStream.getAudioTracks();
+
+      this.isVideoEnabled = videoTracks.length > 0;
+      this.isAudioEnabled = audioTracks.length > 0;
+
+      console.log('✅ Mobile media stream obtained:', {
+        video: this.isVideoEnabled,
+        audio: this.isAudioEnabled,
+        videoTracks: videoTracks.length,
+        audioTracks: audioTracks.length
+      });
+
+      // Set video source
       if (this.isVideoEnabled) {
         this.localVideo.srcObject = this.localStream;
+        this.localVideo.muted = true; // Prevent audio feedback
+        this.localVideo.playsInline = true; // Important for iOS
         this.localPlaceholder.style.display = 'none';
-        console.log('✅ Mobile video enabled and connected');
+        console.log('📹 Mobile video stream connected');
       } else {
         this.localVideo.srcObject = null;
         this.localPlaceholder.style.display = 'flex';
-        console.log('📷 Mobile video disabled, showing placeholder');
+        console.log('📷 Mobile no video track, showing placeholder');
       }
 
-      // Update UI to reflect actual media state
+      // Update UI controls
       this.updateMediaControlsUI();
 
       console.log('🚀 Mobile media initialization complete');
