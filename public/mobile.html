@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Kaminskyi AI Messenger</title>
+  <link rel="stylesheet" href="mobile.css">
+  <script>
+    // Device detection and redirect
+    function isDesktopDevice() {
+      return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+             && window.innerWidth > 768;
+    }
+
+    if (isDesktopDevice()) {
+      window.location.href = '/desktop.html';
+    }
+  </script>
+</head>
+<body>
+  <div id="nameModal" class="modal hidden">
+    <div class="modal-content fade">
+      <h2 id="nameModalTitle">Welcome to Kaminskyi AI Messenger</h2>
+      <p class="muted" id="nameModalText">Please enter your display name to continue</p>
+      <form id="nameForm">
+        <input id="displayNameInput" name="displayName" required maxlength="32" placeholder="Your name">
+        <button type="submit" class="primary" id="nameSubmit">Join Meeting</button>
+      </form>
+      <div id="nameError" class="error hidden"></div>
+    </div>
+  </div>
+
+  <div class="video-call-container">
+    <!-- Back button -->
+    <div class="back-button" id="backButton">
+      <span class="back-arrow">←</span>
+    </div>
+
+    <!-- Main video area -->
+    <div class="main-video" id="mainVideo">
+      <div class="active-speaker-view" id="activeSpeakerView">
+        <!-- Remote participant video -->
+        <video id="remoteVideo" autoplay playsinline></video>
+        <div class="video-placeholder remote-placeholder" id="remotePlaceholder">
+          <div class="placeholder-avatar">👤</div>
+          <div class="speaker-info">
+            <div class="speaker-name" id="speakerName">Waiting for participant...</div>
+            <div class="speaker-status">Active Speaker</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grid view - 5x2 tiles for group call -->
+      <div class="grid-view" id="gridView">
+        <div class="grid-tile" data-peer="self">
+          <video autoplay playsinline muted></video>
+          <div class="grid-avatar">You</div>
+          <div class="grid-name">You</div>
+          <div class="grid-online"></div>
+        </div>
+        <!-- Dynamic participant tiles will be added here -->
+      </div>
+    </div>
+
+    <!-- Small video window (self video) -->
+    <div class="small-video" id="smallVideo">
+      <video id="localVideo" autoplay playsinline muted></video>
+      <div class="video-placeholder local-placeholder" id="localPlaceholder">
+        <div class="placeholder-avatar">👤</div>
+      </div>
+      <div class="small-video-header">
+        <span></span>
+        <span class="expand-icon" id="expandIcon">↗</span>
+      </div>
+    </div>
+
+    <!-- Call timer - CENTERED AT TOP -->
+    <div class="call-timer" id="callTimer">
+      <span class="timer-dot"></span>
+      <span class="timer-value" id="timerValue">00:00</span>
+    </div>
+
+    <!-- User name display - appears under timer, fades after 5s -->
+    <div class="user-name-display" id="userNameDisplay">
+      <span id="displayedUserName">Your Name</span>
+    </div>
+
+    <!-- Chat bubble - LIKE TIKTOK, SEMI-TRANSPARENT ABOVE BOTTOM BAR -->
+    <div class="chat-bubble hidden" id="chatBubble">
+      <div class="chat-avatar">💬</div>
+      <div class="chat-text" id="lastChatMessage">Tap to open chat</div>
+      <span class="chat-expand">▼</span>
+    </div>
+
+    <!-- Mobile chat overlay -->
+    <div class="mobile-chat-overlay" id="mobileChatOverlay">
+      <div class="mobile-chat-header">
+        <h3>Chat</h3>
+        <button id="closeChatBtn">×</button>
+      </div>
+      <div class="mobile-chat-messages" id="mobileChatMessages"></div>
+      <div class="mobile-chat-input-group">
+        <input type="text" class="mobile-chat-input" id="mobileChatInput" placeholder="Type a message...">
+        <button class="mobile-chat-send" id="mobileChatSend">→</button>
+      </div>
+    </div>
+
+    <!-- Bottom controls - SINGLE CONTAINER WITH 5 BUTTONS -->
+    <div class="bottom-controls" id="bottomControls">
+      <div class="bottom-btn" id="shareButton" title="Share link">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" stroke="currentColor" stroke-width="2"/>
+          <polyline points="16,6 12,2 8,6" stroke="currentColor" stroke-width="2"/>
+          <line x1="12" y1="2" x2="12" y2="15" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="bottom-btn" id="videoToggleBtn" title="Toggle camera">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M23 7l-7 5 7 5V7z" stroke="currentColor" stroke-width="2"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="bottom-btn end-call" id="leaveBtn" title="End call">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <path d="M5 12h14m-7-7l7 7-7 7" stroke="currentColor" stroke-width="2" transform="rotate(135 12 12)"/>
+        </svg>
+      </div>
+      <div class="bottom-btn" id="audioToggleBtn" title="Toggle microphone">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke="currentColor" stroke-width="2"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2"/>
+          <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2"/>
+          <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="bottom-btn" id="chatButton" title="Open chat">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Notification banner -->
+    <div id="videoNotice" class="notification-banner hidden"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="mobile.js" defer></script>
+</body>
+</html>

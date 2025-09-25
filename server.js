@@ -18,6 +18,12 @@ const io = new Server(server, {
   cors: {
     origin: '*',
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectTimeout: 45000,
+  maxHttpBufferSize: 1e6,
+  transports: ['websocket', 'polling'],
+  allowEIO3: true,
 });
 
 const db = new sqlite3.Database(path.join(__dirname, 'db.sqlite'));
@@ -54,6 +60,8 @@ const allAsync = (sql, params = []) =>
       }
     });
   });
+
+db.configure('busyTimeout', 30000);
 
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS meetings (
@@ -487,9 +495,26 @@ async function finalizeSociometricTest({ meetingToken, testId, reason = 'complet
 }
 
 app.use(express.json());
+// Device detection middleware
+function detectDevice(req, res, next) {
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+  req.isMobile = isMobile;
+  next();
+}
+
+// Routes for adaptive interface
+app.get('/chat.html', detectDevice, (req, res) => {
+  if (req.isMobile) {
+    res.redirect('/mobile.html' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''));
+  } else {
+    res.redirect('/desktop.html' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''));
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
-const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 6);
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24);
 const EMOTION_KEYS = [
   'joy',
   'interest',
@@ -591,10 +616,12 @@ function registerActiveTest(meetingToken, testMeta) {
     clearTimeout(existing.timeout);
   }
   const durationMs = Math.max(0, new Date(testMeta.endsAt).getTime() - Date.now());
-  const timeout = setTimeout(() => {
-    finalizeSociometricTest({ meetingToken, testId: testMeta.id, reason: 'timeout' }).catch((error) =>
-      console.error('Failed to finalize sociometric test on timeout', error),
-    );
+  const timeout = setTimeout(async () => {
+    try {
+      await finalizeSociometricTest({ meetingToken, testId: testMeta.id, reason: 'timeout' });
+    } catch (error) {
+      console.error('Failed to finalize sociometric test on timeout', error);
+    }
   }, durationMs).unref();
   state.activeTests.set(testMeta.id, { ...testMeta, timeout });
 }
@@ -647,7 +674,22 @@ setInterval(() => {
       sessionStore.delete(token);
     }
   }
+
+  if (global.gc && sessionStore.size > 1000) {
+    global.gc();
+  }
 }, 60 * 1000).unref();
+
+setInterval(() => {
+  const now = Date.now();
+  const maxAge = 1000 * 60 * 60 * 6;
+
+  for (const [token, state] of meetingState.entries()) {
+    if (!state.socketsById.size) {
+      meetingState.delete(token);
+    }
+  }
+}, 300 * 1000).unref();
 
 function authenticate(req) {
   const authHeader = req.headers.authorization;
@@ -730,7 +772,7 @@ app.post('/api/meetings', async (req, res) => {
       }
     } while (!insertResult);
 
-    const meetingUrl = `${req.protocol}://${req.get('host')}/chat.html?room=${encodeURIComponent(
+    const meetingUrl = `${req.protocol}://${req.get('host')}/mobile.html?room=${encodeURIComponent(
       token,
     )}`;
 

@@ -292,6 +292,8 @@ const ui = {
   pipBtn: document.getElementById('pipBtn'),
   muteBtn: document.getElementById('muteBtn'),
   videoBtn: document.getElementById('videoBtn'),
+  videoToggleBtn: document.getElementById('videoToggleBtn'),
+  audioToggleBtn: document.getElementById('audioToggleBtn'),
   cameraFlipBtn: document.getElementById('cameraFlipBtn'),
   screenShareBtn: document.getElementById('screenShareBtn'),
   emotionPanelBtn: document.getElementById('emotionPanelBtn'),
@@ -1157,6 +1159,16 @@ function updateControlButtonStates() {
   ui.videoBtn.classList.toggle('off', !videoEnabled);
   ui.videoBtn.classList.toggle('active', videoEnabled);
   ui.videoBtn.title = videoEnabled ? t('stopVideo') : t('startVideo');
+
+  // Update desktop buttons
+  if (ui.videoToggleBtn) {
+    ui.videoToggleBtn.classList.toggle('muted', !videoEnabled);
+    ui.videoToggleBtn.classList.toggle('active', videoEnabled);
+  }
+  if (ui.audioToggleBtn) {
+    ui.audioToggleBtn.classList.toggle('muted', !audioEnabled);
+    ui.audioToggleBtn.classList.toggle('active', audioEnabled);
+  }
 }
 
 async function detectCameraFlipSupport() {
@@ -1551,6 +1563,12 @@ function toggleAudio(forceValue, { forced = false, silent = false } = {}) {
   ui.muteBtn.classList.toggle('forced', forced && !enable);
   ui.muteBtn.title = enable ? t('mute') : t('unmute');
 
+  // Update desktop audio toggle button
+  if (ui.audioToggleBtn) {
+    ui.audioToggleBtn.classList.toggle('muted', !enable);
+    ui.audioToggleBtn.classList.toggle('active', enable);
+  }
+
   // Update local video tile
   const localTile = document.querySelector('[data-peer="self"]');
   if (localTile) {
@@ -1612,6 +1630,12 @@ function toggleVideo(forceValue, { silent = false } = {}) {
   ui.videoBtn.classList.toggle('off', !enable);
   ui.videoBtn.classList.toggle('active', enable);
   ui.videoBtn.title = enable ? t('stopVideo') : t('startVideo');
+
+  // Update desktop video toggle button
+  if (ui.videoToggleBtn) {
+    ui.videoToggleBtn.classList.toggle('muted', !enable);
+    ui.videoToggleBtn.classList.toggle('active', enable);
+  }
 
   // Update local video tile
   const localTile = document.querySelector('[data-peer="self"]');
@@ -1717,7 +1741,7 @@ function createRemoteTile(peerId, name) {
     tile.dataset.peer = peerId;
     tile.innerHTML = `
       <video autoplay playsinline></video>
-      <div class="video-placeholder">${t('remotePlaceholder')}</div>
+      <div class="video-placeholder"></div>
       <div class="video-label"></div>
     `;
     tile.addEventListener('click', () => setPrimaryPeer(peerId));
@@ -1726,7 +1750,15 @@ function createRemoteTile(peerId, name) {
     ensurePeerOrder(peerId);
   }
   const label = tile.querySelector('.video-label');
-  label.textContent = name || 'Guest';
+  const displayName = name || 'Guest';
+  label.textContent = displayName;
+
+  // Update placeholder text
+  const placeholder = tile.querySelector('.video-placeholder');
+  if (placeholder) {
+    placeholder.textContent = t('remotePlaceholder');
+  }
+
   return tile;
 }
 
@@ -2637,6 +2669,8 @@ function setupEventListeners() {
   ui.pipBtn.addEventListener('click', togglePictureInPicture);
   ui.muteBtn.addEventListener('click', toggleAudio);
   ui.videoBtn.addEventListener('click', toggleVideo);
+  ui.videoToggleBtn.addEventListener('click', toggleVideo);
+  ui.audioToggleBtn.addEventListener('click', toggleAudio);
   ui.cameraFlipBtn.addEventListener('click', switchCamera);
   ui.screenShareBtn.addEventListener('click', toggleScreenShare);
   ui.leaveBtn.addEventListener('click', leaveMeeting);
@@ -2731,14 +2765,13 @@ function setupSocketHandlers() {
     notifyChat(t('joined'));
     ui.chatStatus.textContent = t('chatStatusIdle');
     ui.roleBadge.textContent = isHost ? t('hostBadge') : t('guestBadge');
+    // Always show assistant toolbar for all participants
+    ui.assistantToolbar.classList.remove('hidden');
+
     if (isHost) {
-      ui.assistantToolbar.classList.remove('hidden');
       ui.endMeetingBtn.classList.remove('hidden');
     } else {
-      ui.assistantToolbar.classList.add('hidden');
       ui.endMeetingBtn.classList.add('hidden');
-      state.assistantMode = false;
-      updateAssistantToggle();
     }
 
     await ensureLocalStream().catch(() => {});
@@ -2997,6 +3030,7 @@ async function bootstrap() {
   setupEventListeners();
   setupSocketHandlers();
   setupAssistantHandlers();
+  setupEnhancedAssistantToggle();
   setupWebRTCHandlers();
   setupControlsAutoHide();
   detectCameraFlipSupport();
@@ -3033,6 +3067,62 @@ function addSessionDurationDisplay() {
     header.appendChild(durationDisplay);
   }
 }
+
+// Setup enhanced AI assistant toggle
+function setupEnhancedAssistantToggle() {
+  const toggleContainer = ui.assistantToggleContainer || document.getElementById('assistantToggleContainer');
+  const switchElement = document.getElementById('assistantSwitch');
+  const chatInput = ui.chatInput;
+  const sendBtn = ui.sendBtn;
+  const assistantStatus = document.getElementById('assistantStatus');
+
+  if (!toggleContainer || !switchElement) return;
+
+  // Toggle assistant mode on click
+  toggleContainer.addEventListener('click', () => {
+    state.assistantMode = !state.assistantMode;
+    updateAssistantUI();
+  });
+
+  // Update UI based on assistant mode
+  function updateAssistantUI() {
+    // Update switch appearance
+    switchElement.classList.toggle('active', state.assistantMode);
+    toggleContainer.classList.toggle('active', state.assistantMode);
+
+    // Update input styling
+    if (chatInput) {
+      chatInput.classList.toggle('ai-mode', state.assistantMode);
+      chatInput.placeholder = state.assistantMode ?
+        t('assistantInputPlaceholder') : t('chatInputPlaceholder');
+    }
+
+    // Update send button
+    if (sendBtn) {
+      sendBtn.classList.toggle('ai-mode', state.assistantMode);
+      const sendText = sendBtn.querySelector('.send-text');
+      if (sendText) {
+        sendText.textContent = state.assistantMode ? 'Ask Valera' : 'Send';
+      }
+    }
+
+    // Update status text
+    if (assistantStatus) {
+      assistantStatus.textContent = state.assistantMode ?
+        'AI mode active' : 'Assistant ready';
+    }
+
+    // Update container background
+    toggleContainer.style.background = state.assistantMode ?
+      'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)';
+  }
+
+  // Initialize UI state
+  updateAssistantUI();
+}
+
+// Initialize the app
+bootstrap();
 
 // ===== ENHANCED FUNCTIONALITY =====
 
