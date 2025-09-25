@@ -415,21 +415,53 @@ app.use(express.static('public'));
 
 // Credentials for basic auth
 const validCredentials = [
-  { username: 'Oleh', password: 'Kaminskyi' },
   { username: 'admin', password: 'admin' },
   { username: 'test', password: 'test' }
 ];
 
+// Add credentials from environment variables
+if (process.env.USER1_NAME && process.env.USER1_PASS) {
+  validCredentials.push({
+    username: process.env.USER1_NAME,
+    password: process.env.USER1_PASS
+  });
+}
+
+if (process.env.USER2_NAME && process.env.USER2_PASS) {
+  validCredentials.push({
+    username: process.env.USER2_NAME,
+    password: process.env.USER2_PASS
+  });
+}
+
+// Add admin credentials if available
+if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+  validCredentials.push({
+    username: process.env.ADMIN_USERNAME,
+    password: process.env.ADMIN_PASSWORD
+  });
+}
+
 app.post('/auth', (req, res) => {
   const { username, password } = req.body;
+
+  // Detailed logging for debugging
+  console.log('🔐 Auth attempt:', {
+    username: username,
+    passwordLength: password ? password.length : 0,
+    hasSpecialChars: password ? /[^a-zA-Z0-9]/.test(password) : false
+  });
+
   const user = validCredentials.find(cred =>
     cred.username === username && cred.password === password
   );
 
   if (user) {
+    console.log('✅ Auth successful for:', username);
     const token = crypto.randomBytes(32).toString('hex');
     res.json({ ok: true, username, token });
   } else {
+    console.log('❌ Auth failed for:', username, 'Available users:', validCredentials.map(c => c.username));
     res.status(401).json({ ok: false, message: 'Invalid credentials' });
   }
 });
@@ -1034,6 +1066,11 @@ function analyzeSociometricResults(responses) {
 
 // Clean up expired meetings
 setInterval(async () => {
+  // Only run cleanup if Redis is connected
+  if (!isRedisConnected) {
+    return;
+  }
+
   try {
     const activeRooms = await redis.sMembers(RedisKeys.activeRooms());
 
@@ -1046,9 +1083,14 @@ setInterval(async () => {
       }
     }
   } catch (error) {
-    console.error('Error cleaning up expired meetings:', error);
+    console.error('Error cleaning up expired meetings:', error.message);
   }
 }, 60000); // Check every minute
+
+console.log('🔐 Available login credentials:');
+validCredentials.forEach((cred, index) => {
+  console.log(`   ${index + 1}. Username: "${cred.username}" | Password: "${cred.password}"`);
+});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
