@@ -481,15 +481,24 @@ app.post('/api/meetings', async (req, res) => {
     const meetingUrl = `${req.protocol}://${req.get('host')}${basePath}?room=${roomToken}`;
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    await RedisHelper.createMeeting(roomToken, hostName || 'host');
+    // Try to store in Redis, but continue even if it fails
+    if (isRedisConnected) {
+      try {
+        await RedisHelper.createMeeting(roomToken, hostName || 'host');
 
-    // Store meeting creation context
-    await RedisHelper.updateSession(roomToken, {
-      createdBy: hostName || 'host',
-      createdAt: new Date().toISOString(),
-      userAgent: req.headers['user-agent'],
-      createdFrom: req.headers['x-forwarded-for'] || req.connection.remoteAddress
-    });
+        // Store meeting creation context
+        await RedisHelper.updateSession(roomToken, {
+          createdBy: hostName || 'host',
+          createdAt: new Date().toISOString(),
+          userAgent: req.headers['user-agent'],
+          createdFrom: req.headers['x-forwarded-for'] || req.connection.remoteAddress
+        });
+      } catch (redisError) {
+        console.log('Redis storage failed, continuing with in-memory fallback');
+      }
+    } else {
+      console.log('Redis not connected, using in-memory fallback for room:', roomToken);
+    }
 
     res.json({
       ok: true,
@@ -498,7 +507,8 @@ app.post('/api/meetings', async (req, res) => {
       mobileUrl: `${req.protocol}://${req.get('host')}/mobile.html?room=${roomToken}`,
       desktopUrl: `${req.protocol}://${req.get('host')}/desktop.html?room=${roomToken}`,
       maxParticipants,
-      expiresAt
+      expiresAt,
+      redisStatus: isRedisConnected ? 'connected' : 'fallback'
     });
   } catch (error) {
     console.error('Error creating meeting:', error);

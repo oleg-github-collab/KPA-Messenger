@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Kaminskyi AI Messenger - Joining...</title>
+    <link rel="stylesheet" href="mobile.css">
+    <style>
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #000 0%, #1a1a1a 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 9999;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            border-top-color: #4f46e5;
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+
+        .loading-text {
+            font-size: 18px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .loading-subtext {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+    <script>
+        // Smart device detection and redirect
+        function isMobileDevice() {
+            const userAgent = navigator.userAgent.toLowerCase();
+            const mobileKeywords = ['android', 'webos', 'iphone', 'ipad', 'ipod', 'blackberry', 'iemobile', 'opera mini'];
+
+            // Check user agent
+            const isMobileUA = mobileKeywords.some(keyword => userAgent.includes(keyword));
+
+            // Check screen size (more reliable)
+            const isMobileScreen = window.innerWidth <= 768 || window.innerHeight <= 768;
+
+            // Check touch capability
+            const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+            // Combine all checks
+            return isMobileUA || (isMobileScreen && hasTouch) || window.innerWidth <= 480;
+        }
+
+        // Get room token from URL
+        function getRoomToken() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('room');
+        }
+
+        // Redirect to appropriate interface
+        function redirectToInterface() {
+            const roomToken = getRoomToken();
+
+            if (!roomToken) {
+                // No room token, redirect to home
+                window.location.href = '/';
+                return;
+            }
+
+            // Determine target URL with room token
+            const isMobile = isMobileDevice();
+            const targetUrl = isMobile
+                ? `/mobile.html?room=${encodeURIComponent(roomToken)}`
+                : `/desktop.html?room=${encodeURIComponent(roomToken)}`;
+
+            console.log(`Redirecting ${isMobile ? 'mobile' : 'desktop'} user to:`, targetUrl);
+
+            // Add a slight delay for better UX
+            setTimeout(() => {
+                window.location.href = targetUrl;
+            }, 800);
+        }
+
+        // Initialize redirect immediately
+        document.addEventListener('DOMContentLoaded', redirectToInterface);
+
+        // Backup redirect in case DOMContentLoaded doesn't fire
+        setTimeout(redirectToInterface, 100);
+    </script>
+</head>
+<body>
+    <div class="loading-screen">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Joining meeting...</div>
+        <div class="loading-subtext">Detecting your device for the best experience</div>
+    </div>
+</body>
+</html>
