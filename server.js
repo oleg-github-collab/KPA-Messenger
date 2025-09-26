@@ -763,19 +763,82 @@ app.get('/api/meetings/:token', async (req, res) => {
 // AI Assistant with GPT-4o and web search
 async function webSearch(query) {
   try {
-    // Simple web search using OpenAI's browsing capability
-    // In production, you'd use a proper search API like Bing or Google
-    const searchResults = [
-      {
-        title: "Web Search Result",
-        url: "https://example.com",
-        snippet: `Search results for: ${query}`
+    console.log('🔍 Performing web search for:', query);
+
+    // Try multiple free search APIs with fallbacks
+    let searchResults = [];
+
+    // Method 1: Try DuckDuckGo Instant Answer API (free, no key required)
+    try {
+      const duckDuckGoUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+      const duckResponse = await fetch(duckDuckGoUrl);
+      const duckData = await duckResponse.json();
+
+      if (duckData.AbstractText) {
+        searchResults.push({
+          title: duckData.Heading || 'DuckDuckGo Result',
+          url: duckData.AbstractURL || 'https://duckduckgo.com',
+          snippet: duckData.AbstractText.substring(0, 200) + (duckData.AbstractText.length > 200 ? '...' : '')
+        });
       }
-    ];
-    return searchResults;
+
+      // Add related topics if available
+      if (duckData.RelatedTopics && duckData.RelatedTopics.length > 0) {
+        duckData.RelatedTopics.slice(0, 3).forEach(topic => {
+          if (topic.Text && topic.FirstURL) {
+            searchResults.push({
+              title: topic.Text.split(' - ')[0] || 'Related Topic',
+              url: topic.FirstURL,
+              snippet: topic.Text.substring(0, 150) + (topic.Text.length > 150 ? '...' : '')
+            });
+          }
+        });
+      }
+    } catch (duckError) {
+      console.warn('DuckDuckGo API failed:', duckError.message);
+    }
+
+    // Method 2: Try Wikipedia API as fallback
+    if (searchResults.length === 0) {
+      try {
+        const wikiSearchUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`;
+        const wikiResponse = await fetch(wikiSearchUrl);
+
+        if (wikiResponse.ok) {
+          const wikiData = await wikiResponse.json();
+          searchResults.push({
+            title: wikiData.title || 'Wikipedia Result',
+            url: wikiData.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`,
+            snippet: wikiData.extract || 'No description available'
+          });
+        }
+      } catch (wikiError) {
+        console.warn('Wikipedia API failed:', wikiError.message);
+      }
+    }
+
+    // Method 3: Create generic search results if all APIs fail
+    if (searchResults.length === 0) {
+      console.log('🔍 Using fallback search results');
+      searchResults = [
+        {
+          title: `Search results for "${query}"`,
+          url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+          snippet: `I can help you search for information about "${query}". While I cannot access real-time search results right now, I can provide general information based on my training data. For the most current information, I recommend using the provided search link.`
+        }
+      ];
+    }
+
+    console.log(`✅ Found ${searchResults.length} search results`);
+    return searchResults.slice(0, 5); // Limit to 5 results
+
   } catch (error) {
     console.error('Web search error:', error);
-    return [];
+    return [{
+      title: 'Search Unavailable',
+      url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+      snippet: 'Web search is temporarily unavailable. I can still help with general questions based on my training data.'
+    }];
   }
 }
 
@@ -1001,19 +1064,27 @@ io.on('connection', (socket) => {
 
   // Enhanced chat system
   socket.on('chat-message', async (data) => {
-    const { roomToken, message, from } = data;
+    const { roomToken, message, from, displayName } = data;
+    const sender = displayName || from; // Support both field names
 
     try {
       const meeting = await RedisHelper.getMeeting(roomToken);
       if (meeting) {
         await RedisHelper.addMessage(roomToken, {
-          sender: from,
+          sender: sender,
           text: message,
           kind: 'chat'
         });
       }
 
-      socket.to(roomToken).emit('chat-message', data);
+      // Ensure displayName is set for consistency
+      const messageData = {
+        ...data,
+        displayName: sender,
+        from: sender
+      };
+
+      socket.to(roomToken).emit('chat-message', messageData);
     } catch (error) {
       console.error('Error saving chat message:', error);
     }

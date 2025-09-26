@@ -491,7 +491,7 @@ class MobileVideoCall {
       console.log('✅ Mobile video access granted');
 
       // Update peer connections
-      this.updatePeerConnectionTracks();
+      await this.updatePeerConnectionTracks();
     } catch (error) {
       console.error('❌ Failed to get mobile video access:', error);
       this.showNotification('Camera access denied or unavailable', 'error');
@@ -541,7 +541,7 @@ class MobileVideoCall {
       console.log('✅ Mobile audio access granted');
 
       // Update peer connections
-      this.updatePeerConnectionTracks();
+      await this.updatePeerConnectionTracks();
     } catch (error) {
       console.error('❌ Failed to get mobile audio access:', error);
       this.showNotification('Microphone access denied or unavailable', 'error');
@@ -550,48 +550,92 @@ class MobileVideoCall {
 
   async flipCamera() {
     console.log('📱 Flipping camera...');
-    this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
-    console.log('📹 Switching to facing mode:', this.facingMode);
 
-    if (this.isVideoEnabled) {
-      try {
-        // Get new video stream with different facing mode
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: this.facingMode,
-            width: { ideal: 1280, min: 480 },
-            height: { ideal: 720, min: 320 }
-          }
-        });
-
-        const videoTrack = videoStream.getVideoTracks()[0];
-
-        // Replace the video track in local stream
-        const oldVideoTrack = this.localStream.getVideoTracks()[0];
-        if (oldVideoTrack) {
-          this.localStream.removeTrack(oldVideoTrack);
-          oldVideoTrack.stop();
-        }
-        this.localStream.addTrack(videoTrack);
-
-        // Update local video element
-        if (this.localVideo) {
-          this.localVideo.srcObject = this.localStream;
-        }
-
-        // Update peer connections
-        this.updatePeerConnectionTracks();
-
-        console.log('✅ Camera flipped successfully');
-        this.showNotification(`Switched to ${this.facingMode === 'user' ? 'front' : 'back'} camera`, 'info');
-      } catch (error) {
-        console.error('❌ Failed to flip camera:', error);
-        this.showNotification('Failed to switch camera', 'error');
-        // Revert facing mode on error
-        this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
-      }
-    } else {
+    if (!this.isVideoEnabled) {
       this.showNotification('Turn on camera first', 'warning');
+      return;
+    }
+
+    const newFacingMode = this.facingMode === 'user' ? 'environment' : 'user';
+    console.log('📹 Attempting to switch from', this.facingMode, 'to', newFacingMode);
+
+    let newStream = null;
+    let oldVideoTrack = null;
+
+    try {
+      // Try exact facing mode first
+      let videoConstraints = {
+        facingMode: { exact: newFacingMode },
+        width: { ideal: 1280, min: 480 },
+        height: { ideal: 720, min: 320 }
+      };
+
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints
+        });
+      } catch (exactError) {
+        console.warn('⚠️ Exact facing mode failed, trying ideal:', exactError.message);
+
+        // Fallback to ideal instead of exact
+        videoConstraints.facingMode = { ideal: newFacingMode };
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints
+        });
+      }
+
+      if (!newStream || newStream.getVideoTracks().length === 0) {
+        throw new Error('No video tracks in new stream');
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // Store reference to old track for cleanup
+      oldVideoTrack = this.localStream.getVideoTracks()[0];
+
+      // Create new stream with audio from old stream + new video
+      const audioTracks = this.localStream.getAudioTracks();
+      const newLocalStream = new MediaStream([newVideoTrack, ...audioTracks]);
+
+      // Stop and remove old video track
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+        this.localStream.removeTrack(oldVideoTrack);
+      }
+
+      // Update stream reference
+      this.localStream = newLocalStream;
+
+      // Update local video element
+      if (this.localVideo) {
+        this.localVideo.srcObject = this.localStream;
+      }
+
+      // Update peer connections with new track
+      await this.updatePeerConnectionTracks();
+
+      // Update facing mode only after successful switch
+      this.facingMode = newFacingMode;
+
+      console.log('✅ Camera flipped successfully to', this.facingMode);
+      this.showNotification(`Switched to ${this.facingMode === 'user' ? 'front' : 'back'} camera`, 'info');
+
+    } catch (error) {
+      console.error('❌ Failed to flip camera:', error);
+
+      // Cleanup new stream if it was created
+      if (newStream) {
+        newStream.getTracks().forEach(track => track.stop());
+      }
+
+      // More specific error messages
+      if (error.name === 'NotFoundError' || error.message.includes('device not found')) {
+        this.showNotification(`${newFacingMode === 'user' ? 'Front' : 'Back'} camera not available`, 'error');
+      } else if (error.name === 'NotAllowedError') {
+        this.showNotification('Camera access denied', 'error');
+      } else {
+        this.showNotification('Failed to switch camera', 'error');
+      }
     }
   }
 
@@ -605,27 +649,38 @@ class MobileVideoCall {
     }
   }
 
-  updatePeerConnectionTracks() {
-    // Update all peer connections with new tracks
-    this.peerConnections.forEach(async (peerConnection, participantId) => {
-      if (peerConnection.connectionState !== 'closed') {
-        try {
-          const senders = peerConnection.getSenders();
-          const tracks = this.localStream.getTracks();
+  async updatePeerConnectionTracks() {
+    console.log('📱 Updating peer connection tracks...');
+    const updatePromises = [];
 
-          for (const track of tracks) {
-            const sender = senders.find(s => s.track && s.track.kind === track.kind);
-            if (sender) {
-              await sender.replaceTrack(track);
-            } else {
-              peerConnection.addTrack(track, this.localStream);
+    this.peerConnections.forEach((peerConnection, participantId) => {
+      if (peerConnection.connectionState !== 'closed') {
+        const updatePromise = (async () => {
+          try {
+            const senders = peerConnection.getSenders();
+            const tracks = this.localStream.getTracks();
+
+            for (const track of tracks) {
+              const sender = senders.find(s => s.track && s.track.kind === track.kind);
+              if (sender) {
+                console.log(`🔄 Replacing ${track.kind} track for participant:`, participantId);
+                await sender.replaceTrack(track);
+              } else {
+                console.log(`➕ Adding new ${track.kind} track for participant:`, participantId);
+                peerConnection.addTrack(track, this.localStream);
+              }
             }
+          } catch (error) {
+            console.error('Error updating mobile peer connection tracks for', participantId, ':', error);
           }
-        } catch (error) {
-          console.error('Error updating mobile peer connection tracks:', error);
-        }
+        })();
+
+        updatePromises.push(updatePromise);
       }
     });
+
+    await Promise.all(updatePromises);
+    console.log('✅ All peer connection tracks updated');
   }
 
   // Enhanced Chat Functions - TikTok Style
@@ -847,7 +902,10 @@ class MobileVideoCall {
       const participant = this.participants.get(participantId);
       if (participant) {
         participant.stream = event.streams[0];
-        this.updateRemoteVideo(event.streams[0]);
+        this.updateRemoteVideo(event.streams[0], participant.displayName);
+        console.log('🎥 Remote video stream assigned to participant:', participant.displayName);
+      } else {
+        console.warn('⚠️ Received stream but participant not found:', participantId);
       }
     };
 
@@ -861,12 +919,24 @@ class MobileVideoCall {
     return peerConnection;
   }
 
-  updateRemoteVideo(stream) {
-    if (this.remoteVideo) {
+  updateRemoteVideo(stream, participantName = '') {
+    console.log('📱 Updating remote video with stream:', stream?.id, 'participant:', participantName);
+    if (this.remoteVideo && stream) {
       this.remoteVideo.srcObject = stream;
+      this.remoteVideo.style.display = 'block';
+
       if (this.remotePlaceholder) {
         this.remotePlaceholder.style.display = 'none';
       }
+
+      // Update speaker name
+      if (this.speakerName && participantName) {
+        this.speakerName.textContent = participantName;
+      }
+
+      console.log('✅ Mobile remote video updated successfully');
+    } else {
+      console.warn('⚠️ Cannot update remote video - missing video element or stream');
     }
   }
 

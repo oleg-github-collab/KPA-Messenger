@@ -15,6 +15,8 @@ class DesktopVideoCall {
     this.displayName = null;
     this.isVideoEnabled = false;  // Start disabled until media is obtained
     this.isAudioEnabled = false;  // Start disabled until media is obtained
+    this.isScreenSharing = false; // Screen sharing state
+    this.originalStream = null;   // Store original stream during screen sharing
     this.callStartTime = null;
     this.timerInterval = null;
     this.chatMode = 'normal'; // 'normal' or 'assistant'
@@ -497,7 +499,7 @@ class DesktopVideoCall {
       console.log('✅ Video access granted');
 
       // Update peer connections
-      this.updatePeerConnectionTracks();
+      await this.updatePeerConnectionTracks();
     } catch (error) {
       console.error('❌ Failed to get video access:', error);
       this.showNotification('Camera access denied or unavailable', 'error');
@@ -547,7 +549,7 @@ class DesktopVideoCall {
       console.log('✅ Audio access granted');
 
       // Update peer connections
-      this.updatePeerConnectionTracks();
+      await this.updatePeerConnectionTracks();
     } catch (error) {
       console.error('❌ Failed to get audio access:', error);
       this.showNotification('Microphone access denied or unavailable', 'error');
@@ -598,27 +600,38 @@ class DesktopVideoCall {
     }
   }
 
-  updatePeerConnectionTracks() {
-    // Update all peer connections with new tracks
-    this.peerConnections.forEach(async (peerConnection, participantId) => {
-      if (peerConnection.connectionState !== 'closed') {
-        try {
-          const senders = peerConnection.getSenders();
-          const tracks = this.localStream.getTracks();
+  async updatePeerConnectionTracks() {
+    console.log('🖥️ Updating peer connection tracks...');
+    const updatePromises = [];
 
-          for (const track of tracks) {
-            const sender = senders.find(s => s.track && s.track.kind === track.kind);
-            if (sender) {
-              await sender.replaceTrack(track);
-            } else {
-              peerConnection.addTrack(track, this.localStream);
+    this.peerConnections.forEach((peerConnection, participantId) => {
+      if (peerConnection.connectionState !== 'closed') {
+        const updatePromise = (async () => {
+          try {
+            const senders = peerConnection.getSenders();
+            const tracks = this.localStream.getTracks();
+
+            for (const track of tracks) {
+              const sender = senders.find(s => s.track && s.track.kind === track.kind);
+              if (sender) {
+                console.log(`🔄 Replacing ${track.kind} track for participant:`, participantId);
+                await sender.replaceTrack(track);
+              } else {
+                console.log(`➕ Adding new ${track.kind} track for participant:`, participantId);
+                peerConnection.addTrack(track, this.localStream);
+              }
             }
+          } catch (error) {
+            console.error('Error updating desktop peer connection tracks for', participantId, ':', error);
           }
-        } catch (error) {
-          console.error('Error updating peer connection tracks:', error);
-        }
+        })();
+
+        updatePromises.push(updatePromise);
       }
     });
+
+    await Promise.all(updatePromises);
+    console.log('✅ All desktop peer connection tracks updated');
   }
 
   // Chat Functions
@@ -1021,7 +1034,153 @@ class DesktopVideoCall {
   toggleSidebar() { console.log('Sidebar toggle not implemented yet'); }
   toggleView() { console.log('View toggle not implemented yet'); }
   filterParticipants() { console.log('Participant filter not implemented yet'); }
-  toggleScreenShare() { console.log('Screen share not implemented yet'); }
+  async toggleScreenShare() {
+    console.log('🖥️ Toggling screen share...');
+
+    try {
+      if (this.isScreenSharing) {
+        // Stop screen sharing
+        await this.stopScreenShare();
+      } else {
+        // Start screen sharing
+        await this.startScreenShare();
+      }
+    } catch (error) {
+      console.error('❌ Screen share error:', error);
+      this.showNotification('Failed to toggle screen sharing', 'error');
+    }
+  }
+
+  async startScreenShare() {
+    try {
+      console.log('🖥️ Starting screen share...');
+
+      // Get screen share stream
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+          displaySurface: 'monitor'
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        }
+      });
+
+      // Store original stream for later restoration
+      this.originalStream = this.localStream;
+
+      // Get audio tracks from original stream to maintain audio
+      const audioTracks = this.originalStream ? this.originalStream.getAudioTracks() : [];
+
+      // Create new stream combining screen video and original audio
+      const videoTrack = screenStream.getVideoTracks()[0];
+      this.localStream = new MediaStream([videoTrack, ...audioTracks]);
+
+      // Update local video display
+      if (this.localVideo) {
+        this.localVideo.srcObject = this.localStream;
+      }
+
+      // Update peer connections
+      await this.updatePeerConnectionTracks();
+
+      // Handle screen share end (when user clicks "Stop sharing" in browser)
+      videoTrack.onended = () => {
+        console.log('🖥️ Screen share ended by user');
+        this.stopScreenShare();
+      };
+
+      this.isScreenSharing = true;
+
+      // Update UI
+      if (this.screenShareBtn) {
+        this.screenShareBtn.classList.add('active');
+        this.screenShareBtn.title = 'Stop sharing screen';
+      }
+
+      this.showNotification('Started screen sharing', 'info');
+      console.log('✅ Screen share started successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to start screen share:', error);
+
+      if (error.name === 'NotAllowedError') {
+        this.showNotification('Screen sharing permission denied', 'error');
+      } else if (error.name === 'NotFoundError') {
+        this.showNotification('No screen available for sharing', 'error');
+      } else {
+        this.showNotification('Failed to start screen sharing', 'error');
+      }
+    }
+  }
+
+  async stopScreenShare() {
+    try {
+      console.log('🖥️ Stopping screen share...');
+
+      // Stop current screen tracks
+      if (this.localStream) {
+        this.localStream.getVideoTracks().forEach(track => {
+          track.stop();
+          this.localStream.removeTrack(track);
+        });
+      }
+
+      // Restore original camera stream
+      if (this.originalStream) {
+        const videoTracks = this.originalStream.getVideoTracks();
+        videoTracks.forEach(track => {
+          this.localStream.addTrack(track);
+        });
+
+        // Update local video display
+        if (this.localVideo) {
+          this.localVideo.srcObject = this.localStream;
+        }
+
+        // Clear reference
+        this.originalStream = null;
+      } else {
+        // No original stream, create new camera stream if video was enabled
+        if (this.isVideoEnabled) {
+          try {
+            const cameraStream = await navigator.mediaDevices.getUserMedia({
+              video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+
+            const videoTrack = cameraStream.getVideoTracks()[0];
+            this.localStream.addTrack(videoTrack);
+
+            if (this.localVideo) {
+              this.localVideo.srcObject = this.localStream;
+            }
+          } catch (cameraError) {
+            console.warn('⚠️ Could not restart camera after screen share:', cameraError);
+          }
+        }
+      }
+
+      // Update peer connections
+      await this.updatePeerConnectionTracks();
+
+      this.isScreenSharing = false;
+
+      // Update UI
+      if (this.screenShareBtn) {
+        this.screenShareBtn.classList.remove('active');
+        this.screenShareBtn.title = 'Share screen';
+      }
+
+      this.showNotification('Stopped screen sharing', 'info');
+      console.log('✅ Screen share stopped successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to stop screen share:', error);
+      this.showNotification('Failed to stop screen sharing', 'error');
+    }
+  }
 
   leaveCall() {
     if (confirm('Are you sure you want to leave the call?')) {
