@@ -1218,6 +1218,24 @@ process.on('SIGTERM', async () => {
   });
 });
 
+// Add route for backward compatibility and proper redirects
+app.get('/chat.html', (req, res) => {
+  const isMobile = req.headers['user-agent'] && /Mobile|Android|iPhone|iPad/i.test(req.headers['user-agent']);
+  const targetPage = isMobile ? '/mobile.html' : '/desktop.html';
+  const room = req.query.room;
+
+  if (room) {
+    res.redirect(`${targetPage}?room=${encodeURIComponent(room)}`);
+  } else {
+    res.redirect('/');
+  }
+});
+
+// Root route redirect
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

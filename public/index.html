@@ -367,8 +367,10 @@
       sessionStorage.setItem('enableVideo', enableVideo.toString());
       sessionStorage.setItem('enableAudio', enableAudio.toString());
 
-      // Navigate to meeting
-      window.location.href = `/chat.html?room=${encodeURIComponent(token)}`;
+      // Navigate to meeting - detect device type
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+      const targetPage = isMobile ? '/mobile.html' : '/desktop.html';
+      window.location.href = `${targetPage}?room=${encodeURIComponent(token)}`;
     }
 
     // Event Listeners
