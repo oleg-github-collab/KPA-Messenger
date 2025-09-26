@@ -6,14 +6,18 @@
     <title>Kaminskyi AI Messenger - Desktop</title>
     <link rel="stylesheet" href="desktop.css">
     <script>
-        // Device detection and redirect
+        // Device detection and redirect with room preservation
         function isMobileDevice() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
                    || window.innerWidth <= 768;
         }
 
         if (isMobileDevice()) {
-            window.location.href = '/mobile.html';
+            // Preserve room parameter when redirecting to mobile
+            const urlParams = new URLSearchParams(window.location.search);
+            const room = urlParams.get('room');
+            const redirectUrl = room ? `/mobile.html?room=${encodeURIComponent(room)}` : '/mobile.html';
+            window.location.href = redirectUrl;
         }
     </script>
 </head>
@@ -236,8 +240,8 @@
             </div>
         </div>
 
-        <!-- Enhanced Connection status indicator (moved to bottom right) -->
-        <div class="connection-indicator bottom-right" id="connectionIndicator">
+        <!-- Enhanced Connection status indicator (moved to top left) -->
+        <div class="connection-indicator" id="connectionIndicator">
             <div class="connection-dot"></div>
             <span id="connectionText">Connected</span>
             <div class="connection-details hidden" id="connectionDetails">

@@ -1,29 +1,41 @@
-// Mobile Video Calling Interface - Complete Implementation
+// Mobile Video Calling Interface - Clean Implementation
+console.log('📱 Mobile.js loading...');
 
 class MobileVideoCall {
   constructor() {
+    console.log('📱 Constructing MobileVideoCall...');
+
+    // Core state
     this.socket = null;
     this.localStream = null;
     this.remoteStream = null;
-    this.peerConnection = null;
+    this.peerConnections = new Map();
+    this.participants = new Map();
     this.roomToken = null;
     this.displayName = null;
-    this.isVideoEnabled = true;
-    this.isAudioEnabled = true;
+    this.isVideoEnabled = false;  // Start disabled until media is obtained
+    this.isAudioEnabled = false;  // Start disabled until media is obtained
     this.callStartTime = null;
     this.timerInterval = null;
     this.currentView = 'speaker'; // 'speaker' or 'grid'
-    this.participants = new Map();
-    this.touchStartX = 0;
-    this.touchStartY = 0;
     this.userNameTimeout = null;
 
+    // Touch handling
+    this.touchStartX = 0;
+    this.touchStartY = 0;
+    this.facingMode = 'user'; // For camera flip
+
+    // Initialize in sequence
     this.initializeElements();
     this.setupEventListeners();
     this.checkRoomToken();
+
+    console.log('✅ MobileVideoCall constructor complete');
   }
 
   initializeElements() {
+    console.log('📱 Initializing DOM elements...');
+
     // Video elements
     this.localVideo = document.getElementById('localVideo');
     this.remoteVideo = document.getElementById('remoteVideo');
@@ -35,15 +47,16 @@ class MobileVideoCall {
     this.gridView = document.getElementById('gridView');
     this.mainVideo = document.getElementById('mainVideo');
 
-    // Controls
+    // Essential controls only
     this.videoToggleBtn = document.getElementById('videoToggleBtn');
     this.audioToggleBtn = document.getElementById('audioToggleBtn');
     this.leaveBtn = document.getElementById('leaveBtn');
     this.chatButton = document.getElementById('chatButton');
-    this.shareButton = document.getElementById('shareButton');
     this.backButton = document.getElementById('backButton');
     this.expandIcon = document.getElementById('expandIcon');
-    this.fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    console.log('📹 Video toggle button:', this.videoToggleBtn);
+    console.log('🎤 Audio toggle button:', this.audioToggleBtn);
 
     // UI elements
     this.callTimer = document.getElementById('callTimer');
@@ -57,325 +70,817 @@ class MobileVideoCall {
     this.displayNameInput = document.getElementById('displayNameInput');
     this.nameError = document.getElementById('nameError');
 
-    // Chat elements
-    this.chatBubble = document.getElementById('chatBubble');
+    // Mobile media preferences
+    this.enableVideoMobile = document.getElementById('enableVideoMobile');
+    this.enableAudioMobile = document.getElementById('enableAudioMobile');
+
+    // Chat elements - TikTok style
+    this.floatingMessages = document.getElementById('floatingMessages');
     this.mobileChatOverlay = document.getElementById('mobileChatOverlay');
     this.mobileChatMessages = document.getElementById('mobileChatMessages');
     this.mobileChatInput = document.getElementById('mobileChatInput');
     this.mobileChatSend = document.getElementById('mobileChatSend');
     this.closeChatBtn = document.getElementById('closeChatBtn');
-    this.lastChatMessage = document.getElementById('lastChatMessage');
 
-    // Bottom controls
-    this.bottomControls = document.getElementById('bottomControls');
+    // Reply functionality
+    this.replyPreview = document.getElementById('replyPreview');
+    this.replyToName = document.getElementById('replyToName');
+    this.replyMessage = document.getElementById('replyMessage');
+    this.replyCancel = document.getElementById('replyCancel');
+    this.currentReply = null;
+
+    console.log('✅ Mobile elements initialized successfully');
   }
 
   setupEventListeners() {
-    // Touch gestures for view switching
-    this.mainVideo.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: true });
-    this.mainVideo.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: true });
-    this.mainVideo.addEventListener('touchend', this.handleTouchEnd.bind(this), { passive: true });
+    console.log('📱 Setting up event listeners...');
 
-    // Local video tap to flip camera
-    this.localVideo.addEventListener('click', this.flipCamera.bind(this));
-    this.localPlaceholder.addEventListener('click', this.flipCamera.bind(this));
+    // Essential controls
+    if (this.videoToggleBtn) {
+      console.log('📹 Adding mobile video toggle event listener');
+      this.videoToggleBtn.addEventListener('click', (e) => {
+        console.log('📹 Mobile video toggle clicked');
+        this.toggleVideo();
+      });
+    }
 
-    // Control buttons
-    this.videoToggleBtn.addEventListener('click', this.toggleVideo.bind(this));
-    this.audioToggleBtn.addEventListener('click', this.toggleAudio.bind(this));
-    this.leaveBtn.addEventListener('click', this.leaveCall.bind(this));
-    this.chatButton.addEventListener('click', this.openChat.bind(this));
-    this.shareButton.addEventListener('click', this.shareLink.bind(this));
-    this.backButton.addEventListener('click', this.goBack.bind(this));
-    this.expandIcon.addEventListener('click', this.toggleVideoSize.bind(this));
-    this.fullscreenBtn.addEventListener('click', this.toggleFullscreen.bind(this));
+    if (this.audioToggleBtn) {
+      console.log('🎤 Adding mobile audio toggle event listener');
+      this.audioToggleBtn.addEventListener('click', (e) => {
+        console.log('🎤 Mobile audio toggle clicked');
+        this.toggleAudio();
+      });
+    }
+
+    if (this.leaveBtn) {
+      this.leaveBtn.addEventListener('click', () => this.leaveCall());
+    }
+
+    if (this.chatButton) {
+      this.chatButton.addEventListener('click', () => this.openChat());
+    }
+
+    if (this.backButton) {
+      this.backButton.addEventListener('click', () => this.leaveCall());
+    }
+
+    // Mobile-specific touch events
+    if (this.localVideo) {
+      this.localVideo.addEventListener('click', () => this.flipCamera());
+    }
+
+    if (this.expandIcon) {
+      this.expandIcon.addEventListener('click', () => this.toggleVideoSize());
+    }
 
     // Name form
-    this.nameForm.addEventListener('submit', this.submitName.bind(this));
+    if (this.nameForm) {
+      this.nameForm.addEventListener('submit', (e) => this.submitName(e));
+    }
 
     // Chat functionality
-    this.closeChatBtn.addEventListener('click', this.closeChat.bind(this));
-    this.mobileChatSend.addEventListener('click', this.sendMessage.bind(this));
-    this.mobileChatInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this.sendMessage();
-    });
-    this.chatBubble.addEventListener('click', this.openChat.bind(this));
+    if (this.closeChatBtn) {
+      console.log('💬 Adding mobile chat close event listener');
+      this.closeChatBtn.addEventListener('click', (e) => {
+        console.log('💬 Mobile chat close button clicked');
+        this.closeChat();
+      });
+    }
 
-    // User name display
-    this.userNameDisplay.addEventListener('click', this.showUserName.bind(this));
+    if (this.mobileChatSend) {
+      this.mobileChatSend.addEventListener('click', () => this.sendMessage());
+    }
 
-    // Screen tap to toggle controls
-    this.mainVideo.addEventListener('click', this.toggleControlsVisibility.bind(this));
+    if (this.mobileChatInput) {
+      this.mobileChatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this.sendMessage();
+        }
+      });
+    }
 
-    // Document visibility change (for PiP)
-    document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this));
+    // Reply functionality
+    if (this.replyCancel) {
+      this.replyCancel.addEventListener('click', () => this.cancelReply());
+    }
+
+    // Touch events for mobile gestures
+    this.setupTouchEvents();
+
+    // Window events
+    window.addEventListener('beforeunload', () => this.handleBeforeUnload());
+    window.addEventListener('orientationchange', () => this.handleOrientationChange());
+
+    console.log('✅ Mobile event listeners setup complete');
+  }
+
+  setupTouchEvents() {
+    // Swipe gestures for mobile
+    if (this.mainVideo) {
+      this.mainVideo.addEventListener('touchstart', (e) => {
+        this.touchStartX = e.touches[0].clientX;
+        this.touchStartY = e.touches[0].clientY;
+      });
+
+      this.mainVideo.addEventListener('touchend', (e) => {
+        const touchEndX = e.changedTouches[0].clientX;
+        const touchEndY = e.changedTouches[0].clientY;
+        const deltaX = touchEndX - this.touchStartX;
+        const deltaY = touchEndY - this.touchStartY;
+
+        // Horizontal swipe (left/right)
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+          if (deltaX > 0) {
+            console.log('📱 Swipe right detected');
+          } else {
+            console.log('📱 Swipe left detected');
+          }
+        }
+      });
+    }
   }
 
   checkRoomToken() {
+    console.log('🔍 Checking room token...');
     const urlParams = new URLSearchParams(window.location.search);
     this.roomToken = urlParams.get('room');
 
     if (!this.roomToken) {
+      console.error('❌ No room token found');
       this.showNotification('Invalid meeting link', 'error');
       setTimeout(() => window.location.href = '/', 3000);
       return;
     }
 
+    console.log('✅ Room token found:', this.roomToken);
     this.showNameModal();
   }
 
   showNameModal() {
-    this.nameModal.classList.remove('hidden');
-    this.displayNameInput.focus();
-  }
-
-  async submitName(event) {
-    event.preventDefault();
-    const name = this.displayNameInput.value.trim();
-
-    if (!name) return;
-
-    this.displayName = name;
-    this.displayedUserName.textContent = name;
-    this.nameModal.classList.add('hidden');
-
-    await this.initializeCall();
-  }
-
-  async initializeCall() {
-    try {
-      await this.initializeMedia();
-      this.connectSocket();
-      this.startCallTimer();
-      this.showUserNameTemporarily();
-    } catch (error) {
-      console.error('Failed to initialize call:', error);
-      this.showNotification('Failed to access camera/microphone', 'error');
+    console.log('👤 Showing mobile name modal...');
+    if (this.nameModal) {
+      this.nameModal.classList.remove('hidden');
+      if (this.displayNameInput) {
+        this.displayNameInput.focus();
+      }
     }
   }
 
-  async initializeMedia() {
-    try {
-      console.log('🎬 Starting mobile media initialization...');
+  async submitName(event) {
+    console.log('📝 Submitting mobile name...');
+    event.preventDefault();
+    const name = this.displayNameInput.value.trim();
 
-      // Mobile-optimized constraints
+    if (!name) {
+      this.showError('Name is required');
+      return;
+    }
+
+    this.displayName = name;
+
+    // Get media preferences from mobile checkboxes
+    const videoEnabled = this.enableVideoMobile ? this.enableVideoMobile.checked : true;
+    const audioEnabled = this.enableAudioMobile ? this.enableAudioMobile.checked : true;
+
+    console.log('📱 Mobile media preferences:', { video: videoEnabled, audio: audioEnabled });
+
+    // Update UI with name
+    if (this.displayedUserName) this.displayedUserName.textContent = name;
+
+    if (this.nameModal) {
+      this.nameModal.classList.add('hidden');
+    }
+
+    console.log('✅ Name submitted:', name);
+    await this.initializeCall(videoEnabled, audioEnabled);
+  }
+
+  async initializeCall(videoEnabled = true, audioEnabled = true) {
+    try {
+      console.log('📱 Starting mobile call initialization...', { video: videoEnabled, audio: audioEnabled });
+
+      // First try to get media
+      await this.initializeMedia(videoEnabled, audioEnabled);
+
+      // Then connect to server
+      this.connectSocket();
+
+      // Start timer
+      this.startCallTimer();
+
+      // Show user name temporarily
+      this.showUserNameTemporarily();
+
+      console.log('✅ Mobile call initialization complete');
+    } catch (error) {
+      console.error('❌ Mobile call initialization failed:', error);
+      this.showNotification('Failed to access camera/microphone', 'error');
+
+      // Continue with chat-only mode
+      this.createFallbackStream();
+      this.connectSocket();
+      this.startCallTimer();
+      this.showUserNameTemporarily();
+    }
+  }
+
+  async initializeMedia(videoEnabled = true, audioEnabled = true) {
+    try {
+      console.log('📱 Requesting mobile media access...', { video: videoEnabled, audio: audioEnabled });
+
       const constraints = {
-        video: {
-          facingMode: 'user',
-          width: { ideal: 640, min: 320 },
-          height: { ideal: 480, min: 240 },
-          frameRate: { ideal: 24, min: 15 }
-        },
-        audio: {
+        video: videoEnabled ? {
+          width: { ideal: 1280, min: 480 },
+          height: { ideal: 720, min: 320 },
+          facingMode: this.facingMode,
+          frameRate: { ideal: 30, min: 15 }
+        } : false,
+        audio: audioEnabled ? {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: { ideal: 44100 }
-        }
+          autoGainControl: true
+        } : false
       };
 
-      console.log('🎥 Mobile requesting user media...');
+      console.log('📞 Calling getUserMedia with mobile constraints:', constraints);
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Check what we actually got
       const videoTracks = this.localStream.getVideoTracks();
       const audioTracks = this.localStream.getAudioTracks();
 
       this.isVideoEnabled = videoTracks.length > 0;
       this.isAudioEnabled = audioTracks.length > 0;
 
-      console.log('✅ Mobile media stream obtained:', {
+      console.log('✅ Mobile media obtained:', {
         video: this.isVideoEnabled,
         audio: this.isAudioEnabled,
         videoTracks: videoTracks.length,
         audioTracks: audioTracks.length
       });
 
-      // Set video source
-      if (this.isVideoEnabled) {
+      // Set up local video
+      if (this.isVideoEnabled && this.localVideo) {
         this.localVideo.srcObject = this.localStream;
-        this.localVideo.muted = true; // Prevent audio feedback
-        this.localVideo.playsInline = true; // Important for iOS
-        this.localPlaceholder.style.display = 'none';
-        console.log('📹 Mobile video stream connected');
+        this.localVideo.muted = true; // Prevent feedback
+        if (this.localPlaceholder) {
+          this.localPlaceholder.style.display = 'none';
+        }
+        console.log('📹 Mobile local video connected');
       } else {
-        this.localVideo.srcObject = null;
-        this.localPlaceholder.style.display = 'flex';
-        console.log('📷 Mobile no video track, showing placeholder');
+        if (this.localVideo) this.localVideo.srcObject = null;
+        if (this.localPlaceholder) {
+          this.localPlaceholder.style.display = 'flex';
+        }
+        console.log('📷 No mobile video track, showing placeholder');
       }
 
-      // Update UI controls
+      // Update UI immediately
       this.updateMediaControlsUI();
 
-      console.log('🚀 Mobile media initialization complete');
+      // Add self to participant list
+      this.addParticipant({
+        id: 'self',
+        displayName: this.displayName,
+        isLocal: true
+      });
+
+      console.log('🎉 Mobile media initialization complete');
 
     } catch (error) {
-      console.error('💥 Mobile error accessing media devices:', error);
+      console.error('💥 Mobile media access error:', error);
 
-      // Handle permission denials gracefully
+      // Always create fallback and continue
+      this.createFallbackStream();
+
+      // Show specific error messages
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        this.showNotification('Camera/microphone access denied. You can still join with chat only.', 'warning');
-        this.createFallbackStream();
+        this.showNotification('Camera/microphone access denied. Tap controls to try again.', 'warning');
       } else if (error.name === 'NotFoundError') {
-        this.showNotification('No camera/microphone found. Joining with chat only.', 'warning');
-        this.createFallbackStream();
+        this.showNotification('No camera/microphone found. Audio/video disabled.', 'warning');
+      } else if (error.name === 'NotReadableError') {
+        this.showNotification('Camera/microphone in use by another app.', 'warning');
       } else {
-        this.showNotification('Media access failed. Joining with chat only.', 'error');
-        this.createFallbackStream();
+        this.showNotification('Media access failed. Continuing with chat only.', 'error');
       }
-    }
-  }
 
-  getMediaPreference(key) {
-    // Try to get from URL params first (for deep linking)
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has(key)) {
-      return urlParams.get(key) === 'true';
-    }
+      // Add self to participant list anyway
+      this.addParticipant({
+        id: 'self',
+        displayName: this.displayName,
+        isLocal: true
+      });
 
-    // Try to get from sessionStorage (from login page)
-    const stored = sessionStorage.getItem(key);
-    if (stored !== null) {
-      return stored === 'true';
+      console.log('📱 Mobile media initialization complete (fallback mode)');
+      throw error; // Re-throw so initializeCall can handle it
     }
-
-    // Default to enabled
-    return true;
   }
 
   createFallbackStream() {
-    // Create empty stream for chat-only mode
+    console.log('🔄 Creating mobile fallback stream (no media)...');
     this.localStream = new MediaStream();
     this.isVideoEnabled = false;
     this.isAudioEnabled = false;
-    this.localVideo.srcObject = null;
-    this.localPlaceholder.style.display = 'flex';
+
+    if (this.localVideo) this.localVideo.srcObject = null;
+    if (this.localPlaceholder) this.localPlaceholder.style.display = 'flex';
+
     this.updateMediaControlsUI();
+    console.log('✅ Mobile fallback stream created');
   }
 
   updateMediaControlsUI() {
-    // Update video toggle button
-    const videoBtn = document.getElementById('videoBtn');
-    if (videoBtn) {
-      videoBtn.classList.toggle('disabled', !this.isVideoEnabled);
-      videoBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
+    console.log('📱 Updating mobile media controls UI...', {
+      video: this.isVideoEnabled,
+      audio: this.isAudioEnabled
+    });
+
+    // Update video button
+    if (this.videoToggleBtn) {
+      this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
+      this.videoToggleBtn.classList.toggle('muted', !this.isVideoEnabled);
+      this.videoToggleBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
+
+      // Visual feedback for mobile
+      const svg = this.videoToggleBtn.querySelector('svg');
+      if (svg) {
+        svg.style.opacity = this.isVideoEnabled ? '1' : '0.6';
+        svg.style.filter = this.isVideoEnabled ? 'none' : 'grayscale(1)';
+      }
+      console.log('📹 Mobile video button updated:', this.isVideoEnabled);
     }
 
-    // Update audio toggle button
-    const audioBtn = document.getElementById('audioBtn');
-    if (audioBtn) {
-      audioBtn.classList.toggle('disabled', !this.isAudioEnabled);
-      audioBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
+    // Update audio button
+    if (this.audioToggleBtn) {
+      this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
+      this.audioToggleBtn.classList.toggle('muted', !this.isAudioEnabled);
+      this.audioToggleBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
+
+      // Visual feedback for mobile
+      const svg = this.audioToggleBtn.querySelector('svg');
+      if (svg) {
+        svg.style.opacity = this.isAudioEnabled ? '1' : '0.6';
+        svg.style.filter = this.isAudioEnabled ? 'none' : 'grayscale(1)';
+      }
+      console.log('🎤 Mobile audio button updated:', this.isAudioEnabled);
+    }
+
+    // Update video display
+    if (this.isVideoEnabled) {
+      if (this.localPlaceholder) this.localPlaceholder.style.display = 'none';
+      if (this.localVideo) this.localVideo.style.display = 'block';
+    } else {
+      if (this.localPlaceholder) this.localPlaceholder.style.display = 'flex';
+      if (this.localVideo) this.localVideo.style.display = 'none';
+    }
+
+    console.log('✅ Mobile media controls UI updated');
+  }
+
+  // Media Control Functions
+  async toggleVideo() {
+    console.log('📱 Mobile toggle video called, current state:', this.isVideoEnabled);
+
+    if (this.localStream) {
+      const videoTrack = this.localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        // Toggle existing track
+        videoTrack.enabled = !videoTrack.enabled;
+        this.isVideoEnabled = videoTrack.enabled;
+        console.log('📹 Mobile video track toggled to:', this.isVideoEnabled);
+      } else if (!this.isVideoEnabled) {
+        // Try to get video access
+        console.log('📹 No video track, requesting mobile access...');
+        await this.requestVideoAccess();
+      }
+    } else if (!this.isVideoEnabled) {
+      // Try to initialize media
+      console.log('📹 No stream, requesting mobile video access...');
+      await this.requestVideoAccess();
+    }
+
+    this.updateMediaControlsUI();
+    this.showNotification(this.isVideoEnabled ? 'Camera turned on' : 'Camera turned off', 'info');
+  }
+
+  async requestVideoAccess() {
+    try {
+      console.log('📹 Requesting mobile video access...');
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: this.facingMode,
+          width: { ideal: 1280, min: 480 },
+          height: { ideal: 720, min: 320 }
+        }
+      });
+      const videoTrack = videoStream.getVideoTracks()[0];
+
+      if (this.localStream) {
+        // Add to existing stream
+        this.localStream.addTrack(videoTrack);
+      } else {
+        // Create new stream
+        this.localStream = videoStream;
+      }
+
+      if (this.localVideo) {
+        this.localVideo.srcObject = this.localStream;
+      }
+
+      this.isVideoEnabled = true;
+      console.log('✅ Mobile video access granted');
+
+      // Update peer connections
+      this.updatePeerConnectionTracks();
+    } catch (error) {
+      console.error('❌ Failed to get mobile video access:', error);
+      this.showNotification('Camera access denied or unavailable', 'error');
     }
   }
 
+  async toggleAudio() {
+    console.log('📱 Mobile toggle audio called, current state:', this.isAudioEnabled);
+
+    if (this.localStream) {
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        // Toggle existing track
+        audioTrack.enabled = !audioTrack.enabled;
+        this.isAudioEnabled = audioTrack.enabled;
+        console.log('🎤 Mobile audio track toggled to:', this.isAudioEnabled);
+      } else if (!this.isAudioEnabled) {
+        // Try to get audio access
+        console.log('🎤 No audio track, requesting mobile access...');
+        await this.requestAudioAccess();
+      }
+    } else if (!this.isAudioEnabled) {
+      // Try to initialize media
+      console.log('🎤 No stream, requesting mobile audio access...');
+      await this.requestAudioAccess();
+    }
+
+    this.updateMediaControlsUI();
+    this.showNotification(this.isAudioEnabled ? 'Microphone unmuted' : 'Microphone muted', 'info');
+  }
+
+  async requestAudioAccess() {
+    try {
+      console.log('🎤 Requesting mobile audio access...');
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioTrack = audioStream.getAudioTracks()[0];
+
+      if (this.localStream) {
+        // Add to existing stream
+        this.localStream.addTrack(audioTrack);
+      } else {
+        // Create new stream
+        this.localStream = audioStream;
+      }
+
+      this.isAudioEnabled = true;
+      console.log('✅ Mobile audio access granted');
+
+      // Update peer connections
+      this.updatePeerConnectionTracks();
+    } catch (error) {
+      console.error('❌ Failed to get mobile audio access:', error);
+      this.showNotification('Microphone access denied or unavailable', 'error');
+    }
+  }
+
+  async flipCamera() {
+    console.log('📱 Flipping camera...');
+    this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
+    console.log('📹 Switching to facing mode:', this.facingMode);
+
+    if (this.isVideoEnabled) {
+      try {
+        // Get new video stream with different facing mode
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: this.facingMode,
+            width: { ideal: 1280, min: 480 },
+            height: { ideal: 720, min: 320 }
+          }
+        });
+
+        const videoTrack = videoStream.getVideoTracks()[0];
+
+        // Replace the video track in local stream
+        const oldVideoTrack = this.localStream.getVideoTracks()[0];
+        if (oldVideoTrack) {
+          this.localStream.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        this.localStream.addTrack(videoTrack);
+
+        // Update local video element
+        if (this.localVideo) {
+          this.localVideo.srcObject = this.localStream;
+        }
+
+        // Update peer connections
+        this.updatePeerConnectionTracks();
+
+        console.log('✅ Camera flipped successfully');
+        this.showNotification(`Switched to ${this.facingMode === 'user' ? 'front' : 'back'} camera`, 'info');
+      } catch (error) {
+        console.error('❌ Failed to flip camera:', error);
+        this.showNotification('Failed to switch camera', 'error');
+        // Revert facing mode on error
+        this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
+      }
+    } else {
+      this.showNotification('Turn on camera first', 'warning');
+    }
+  }
+
+  toggleVideoSize() {
+    const isExpanded = this.smallVideo?.classList.contains('expanded');
+    if (this.smallVideo) {
+      this.smallVideo.classList.toggle('expanded', !isExpanded);
+    }
+    if (this.expandIcon) {
+      this.expandIcon.textContent = isExpanded ? '↗' : '↙';
+    }
+  }
+
+  updatePeerConnectionTracks() {
+    // Update all peer connections with new tracks
+    this.peerConnections.forEach(async (peerConnection, participantId) => {
+      if (peerConnection.connectionState !== 'closed') {
+        try {
+          const senders = peerConnection.getSenders();
+          const tracks = this.localStream.getTracks();
+
+          for (const track of tracks) {
+            const sender = senders.find(s => s.track && s.track.kind === track.kind);
+            if (sender) {
+              await sender.replaceTrack(track);
+            } else {
+              peerConnection.addTrack(track, this.localStream);
+            }
+          }
+        } catch (error) {
+          console.error('Error updating mobile peer connection tracks:', error);
+        }
+      }
+    });
+  }
+
+  // Enhanced Chat Functions - TikTok Style
+  openChat() {
+    console.log('💬 Opening mobile chat...');
+    if (this.mobileChatOverlay) {
+      this.mobileChatOverlay.style.display = 'flex';
+      this.mobileChatOverlay.classList.add('active');
+    }
+    if (this.mobileChatInput) {
+      setTimeout(() => this.mobileChatInput.focus(), 300);
+    }
+    console.log('✅ Mobile chat opened');
+  }
+
+  closeChat() {
+    console.log('💬 Closing mobile chat...');
+    if (this.mobileChatOverlay) {
+      this.mobileChatOverlay.style.display = 'none';
+      this.mobileChatOverlay.classList.remove('active');
+      console.log('💬 Mobile chat overlay hidden');
+    }
+    // Cancel any active reply
+    this.cancelReply();
+    console.log('✅ Mobile chat closed successfully');
+  }
+
+  sendMessage() {
+    const message = this.mobileChatInput?.value.trim();
+    if (!message || !this.socket) return;
+
+    const messageData = {
+      roomToken: this.roomToken,
+      message: message,
+      from: this.displayName,
+      timestamp: Date.now()
+    };
+
+    // Add reply information if replying
+    if (this.currentReply) {
+      messageData.replyTo = this.currentReply;
+    }
+
+    this.socket.emit('chat-message', messageData);
+
+    this.addChatMessage({
+      ...messageData,
+      isOwn: true
+    });
+
+    // Show floating message
+    this.addFloatingMessage({
+      ...messageData,
+      isOwn: true
+    });
+
+    if (this.mobileChatInput) this.mobileChatInput.value = '';
+    this.cancelReply();
+  }
+
+  addChatMessage(data) {
+    if (!this.mobileChatMessages) return;
+
+    const messageElement = document.createElement('div');
+    messageElement.className = `chat-message ${data.isOwn ? 'own' : 'other'}`;
+
+    const time = new Date(data.timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    let replyHtml = '';
+    if (data.replyTo) {
+      replyHtml = `
+        <div class="reply-info">
+          <span class="reply-to-name">${data.replyTo.from}</span>
+          <span class="reply-to-message">${data.replyTo.message}</span>
+        </div>
+      `;
+    }
+
+    messageElement.innerHTML = `
+      <div class="message-header">
+        <span class="message-author">${data.from}</span>
+        <span class="message-time">${time}</span>
+      </div>
+      ${replyHtml}
+      <div class="message-bubble" data-message-id="${data.timestamp}" data-from="${data.from}" data-message="${data.message}">
+        ${data.message}
+      </div>
+    `;
+
+    // Add click handler for reply
+    const messageBubble = messageElement.querySelector('.message-bubble');
+    messageBubble.addEventListener('click', () => {
+      if (!data.isOwn) {
+        this.setReply(data);
+      }
+    });
+
+    this.mobileChatMessages.appendChild(messageElement);
+    this.mobileChatMessages.scrollTop = this.mobileChatMessages.scrollHeight;
+
+    // Remove welcome message if it exists
+    const welcomeMessage = this.mobileChatMessages.querySelector('.chat-welcome');
+    if (welcomeMessage) {
+      welcomeMessage.remove();
+    }
+  }
+
+  addFloatingMessage(data) {
+    if (!this.floatingMessages) return;
+
+    const floatingElement = document.createElement('div');
+    floatingElement.className = `floating-message ${data.isOwn ? 'own' : 'other'}`;
+
+    const time = new Date(data.timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    floatingElement.innerHTML = `
+      <div class="floating-message-header">
+        <span class="floating-message-author">${data.from}</span>
+        <span class="floating-message-time">${time}</span>
+      </div>
+      <div class="floating-message-text">${data.message}</div>
+    `;
+
+    // Add click handler to open chat
+    floatingElement.addEventListener('click', () => {
+      this.openChat();
+    });
+
+    this.floatingMessages.appendChild(floatingElement);
+
+    // Remove old messages if too many
+    const messages = this.floatingMessages.querySelectorAll('.floating-message');
+    if (messages.length > 5) {
+      messages[0].remove();
+    }
+
+    // Auto-hide after 10 seconds
+    setTimeout(() => {
+      if (floatingElement.parentNode) {
+        floatingElement.style.opacity = '0';
+        setTimeout(() => {
+          if (floatingElement.parentNode) {
+            floatingElement.remove();
+          }
+        }, 300);
+      }
+    }, 10000);
+  }
+
+  handleChatMessage(data) {
+    console.log('📱 Received chat message:', data);
+    this.displayChatMessage(data);
+  }
+
+
+  // Socket Connection
   connectSocket() {
+    console.log('🔌 Connecting mobile to server...');
+
     this.socket = io({
       transports: ['websocket', 'polling'],
       timeout: 20000,
       reconnection: true,
-      reconnectionAttempts: this.maxReconnectAttempts || 50,
+      reconnectionAttempts: 50,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 30000
+      reconnectionDelayMax: 10000
     });
 
     this.socket.on('connect', () => {
-      console.log('Connected to server');
+      console.log('✅ Mobile connected to server');
       this.socket.emit('join-room', {
         roomToken: this.roomToken,
         displayName: this.displayName
       });
     });
 
-    this.socket.on('user-joined', (data) => {
-      this.handleUserJoined(data);
-    });
-
-    this.socket.on('user-left', (data) => {
-      this.handleUserLeft(data);
-    });
-
-    this.socket.on('offer', async (data) => {
-      await this.handleOffer(data);
-    });
-
-    this.socket.on('answer', async (data) => {
-      await this.handleAnswer(data);
-    });
-
-    this.socket.on('ice-candidate', (data) => {
-      this.handleIceCandidate(data);
-    });
-
-    this.socket.on('chat-message', (data) => {
-      this.handleChatMessage(data);
-    });
-
-    this.socket.on('room-full', () => {
-      this.showNotification('Meeting is full', 'error');
-    });
-
-    this.socket.on('room-not-found', () => {
-      this.showNotification('Meeting not found', 'error');
-    });
-
     this.socket.on('disconnect', (reason) => {
-      console.log('📱 Mobile disconnected:', reason);
-      this.showNotification('Connection lost, reconnecting...', 'warning');
-      this.handleDisconnection();
-    });
-
-    this.socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('📱 Mobile reconnection attempt:', attemptNumber);
-      this.showNotification(`Reconnecting... (${attemptNumber})`, 'warning');
+      console.log('❌ Mobile disconnected:', reason);
     });
 
     this.socket.on('reconnect', () => {
-      console.log('📱 Mobile reconnected to server');
-      this.showNotification('Connected', 'success');
-      this.rejoinRoom();
+      console.log('🔄 Mobile reconnected to server');
     });
+
+    this.socket.on('user-joined', (data) => this.handleUserJoined(data));
+    this.socket.on('user-left', (data) => this.handleUserLeft(data));
+    this.socket.on('offer', (data) => this.handleOffer(data));
+    this.socket.on('answer', (data) => this.handleAnswer(data));
+    this.socket.on('ice-candidate', (data) => this.handleIceCandidate(data));
+    this.socket.on('chat-message', (data) => this.handleChatMessage(data));
   }
 
-  async createPeerConnection() {
-    const configuration = {
+  // WebRTC Functions (simplified for mobile)
+  async createPeerConnection(participantId) {
+    const peerConnection = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' }
       ]
-    };
+    });
 
-    this.peerConnection = new RTCPeerConnection(configuration);
-
-    this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate && this.socket) {
         this.socket.emit('ice-candidate', {
           roomToken: this.roomToken,
-          candidate: event.candidate
+          candidate: event.candidate,
+          targetId: participantId
         });
       }
     };
 
-    this.peerConnection.ontrack = (event) => {
-      this.remoteStream = event.streams[0];
-      this.remoteVideo.srcObject = this.remoteStream;
-      this.remotePlaceholder.style.display = 'none';
-      this.speakerName.textContent = 'Participant';
+    peerConnection.ontrack = (event) => {
+      console.log('📱 Received remote stream from:', participantId);
+      const participant = this.participants.get(participantId);
+      if (participant) {
+        participant.stream = event.streams[0];
+        this.updateRemoteVideo(event.streams[0]);
+      }
     };
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        this.peerConnection.addTrack(track, this.localStream);
+        peerConnection.addTrack(track, this.localStream);
       });
+    }
+
+    this.peerConnections.set(participantId, peerConnection);
+    return peerConnection;
+  }
+
+  updateRemoteVideo(stream) {
+    if (this.remoteVideo) {
+      this.remoteVideo.srcObject = stream;
+      if (this.remotePlaceholder) {
+        this.remotePlaceholder.style.display = 'none';
+      }
     }
   }
 
   async handleUserJoined(data) {
-    console.log('User joined:', data.displayName);
-    await this.createPeerConnection();
+    console.log('👋 Mobile - User joined:', data.displayName);
+    this.addParticipant({
+      id: data.socketId,
+      displayName: data.displayName,
+      isLocal: false
+    });
 
-    const offer = await this.peerConnection.createOffer();
-    await this.peerConnection.setLocalDescription(offer);
+    const peerConnection = await this.createPeerConnection(data.socketId);
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
 
     this.socket.emit('offer', {
       roomToken: this.roomToken,
@@ -385,11 +890,10 @@ class MobileVideoCall {
   }
 
   async handleOffer(data) {
-    await this.createPeerConnection();
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-
-    const answer = await this.peerConnection.createAnswer();
-    await this.peerConnection.setLocalDescription(answer);
+    const peerConnection = await this.createPeerConnection(data.from);
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
 
     this.socket.emit('answer', {
       roomToken: this.roomToken,
@@ -399,612 +903,297 @@ class MobileVideoCall {
   }
 
   async handleAnswer(data) {
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    const peerConnection = this.peerConnections.get(data.from);
+    if (peerConnection) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    }
   }
 
   handleIceCandidate(data) {
-    if (this.peerConnection) {
-      this.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+    const peerConnection = this.peerConnections.get(data.from);
+    if (peerConnection) {
+      peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
     }
   }
 
   handleUserLeft(data) {
-    console.log('User left:', data.displayName);
-    if (this.peerConnection) {
-      this.peerConnection.close();
-      this.peerConnection = null;
+    console.log('👋 Mobile - User left:', data.displayName);
+    const peerConnection = this.peerConnections.get(data.socketId);
+    if (peerConnection) {
+      peerConnection.close();
+      this.peerConnections.delete(data.socketId);
     }
-    this.remoteVideo.srcObject = null;
-    this.remotePlaceholder.style.display = 'flex';
-    this.speakerName.textContent = 'Waiting for participant...';
+    this.removeParticipant(data.socketId);
   }
 
-  // Touch gesture handling for view switching
-  handleTouchStart(event) {
-    if (event.touches.length === 1) {
-      this.touchStartX = event.touches[0].clientX;
-      this.touchStartY = event.touches[0].clientY;
+  // Participant Management
+  addParticipant(participant) {
+    this.participants.set(participant.id, participant);
+    console.log('📱 Added participant:', participant.displayName);
+  }
+
+  removeParticipant(participantId) {
+    const participant = this.participants.get(participantId);
+    if (participant) {
+      console.log('📱 Removed participant:', participant.displayName);
     }
+    this.participants.delete(participantId);
   }
 
-  handleTouchMove(event) {
-    // Prevent scrolling during swipe
-    event.preventDefault();
+  // Utility Functions
+  startCallTimer() {
+    this.callStartTime = Date.now();
+    this.timerInterval = setInterval(() => {
+      if (!this.timerValue) return;
+
+      const elapsed = Date.now() - this.callStartTime;
+      const minutes = Math.floor(elapsed / 60000);
+      const seconds = Math.floor((elapsed % 60000) / 1000);
+
+      const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      this.timerValue.textContent = timeString;
+    }, 1000);
   }
 
-  handleTouchEnd(event) {
-    if (!event.changedTouches.length) return;
+  showUserNameTemporarily() {
+    if (this.userNameDisplay) {
+      this.userNameDisplay.style.opacity = '1';
+      this.userNameDisplay.style.pointerEvents = 'auto';
 
-    const touchEndX = event.changedTouches[0].clientX;
-    const touchEndY = event.changedTouches[0].clientY;
-
-    const deltaX = touchEndX - this.touchStartX;
-    const deltaY = touchEndY - this.touchStartY;
-
-    // Minimum swipe distance
-    const minSwipeDistance = 50;
-
-    // Horizontal swipe detection
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
-      if (deltaX > 0) {
-        // Swipe right
-        if (this.currentView === 'grid') {
-          this.switchToSpeakerView();
-        }
-      } else {
-        // Swipe left
-        if (this.currentView === 'speaker') {
-          this.switchToGridView();
-        }
-      }
-    }
-  }
-
-  switchToSpeakerView() {
-    this.currentView = 'speaker';
-    this.activeSpeakerView.style.display = 'block';
-    this.gridView.style.display = 'none';
-    this.mainVideo.classList.remove('grid-mode');
-  }
-
-  switchToGridView() {
-    this.currentView = 'grid';
-    this.activeSpeakerView.style.display = 'none';
-    this.gridView.style.display = 'grid';
-    this.mainVideo.classList.add('grid-mode');
-  }
-
-  toggleVideo() {
-    if (this.localStream) {
-      const videoTrack = this.localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        this.isVideoEnabled = videoTrack.enabled;
-        this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
-
-        if (!this.isVideoEnabled) {
-          this.localPlaceholder.style.display = 'flex';
-        } else {
-          this.localPlaceholder.style.display = 'none';
-        }
-      }
-    }
-  }
-
-  async flipCamera() {
-    if (!this.isVideoEnabled || !this.localStream) return;
-
-    try {
-      // Get current facing mode
-      const videoTrack = this.localStream.getVideoTracks()[0];
-      const settings = videoTrack.getSettings();
-      const currentFacing = settings.facingMode || 'user';
-
-      // Determine new facing mode
-      const newFacing = currentFacing === 'user' ? 'environment' : 'user';
-
-      // Get new stream with flipped camera
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: newFacing,
-          width: { ideal: 640, min: 320 },
-          height: { ideal: 480, min: 240 }
-        },
-        audio: false // Keep existing audio
-      });
-
-      const newVideoTrack = newStream.getVideoTracks()[0];
-
-      // Replace track in existing stream
-      if (this.localStream) {
-        const oldVideoTrack = this.localStream.getVideoTracks()[0];
-        if (oldVideoTrack) {
-          this.localStream.removeTrack(oldVideoTrack);
-          oldVideoTrack.stop();
-        }
-        this.localStream.addTrack(newVideoTrack);
+      if (this.userNameTimeout) {
+        clearTimeout(this.userNameTimeout);
       }
 
-      // Update video element
-      this.localVideo.srcObject = this.localStream;
-
-      // Update all peer connections
-      this.updatePeerConnections(newVideoTrack);
-
-      // Show feedback
-      this.showFlipFeedback(newFacing);
-
-    } catch (error) {
-      console.error('Failed to flip camera:', error);
-      // Show notification
-      const notification = document.createElement('div');
-      notification.className = 'flip-notification';
-      notification.textContent = 'Camera flip not available';
-      notification.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0,0,0,0.8);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 20px;
-        font-size: 14px;
-        z-index: 1000;
-      `;
-      document.body.appendChild(notification);
-      setTimeout(() => notification.remove(), 2000);
-    }
-  }
-
-  updatePeerConnections(newVideoTrack) {
-    if (this.peerConnection && this.peerConnection.connectionState !== 'closed') {
-      const senders = this.peerConnection.getSenders();
-      const videoSender = senders.find(sender =>
-        sender.track && sender.track.kind === 'video'
-      );
-
-      if (videoSender) {
-        videoSender.replaceTrack(newVideoTrack);
-      }
-    }
-  }
-
-  showFlipFeedback(facingMode) {
-    const feedback = document.createElement('div');
-    feedback.className = 'flip-feedback';
-    feedback.textContent = facingMode === 'user' ? '📷 Front camera' : '📷 Back camera';
-    feedback.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.8);
-      color: white;
-      padding: 8px 16px;
-      border-radius: 16px;
-      font-size: 12px;
-      z-index: 1000;
-      animation: fadeInOut 2s ease-in-out forwards;
-    `;
-
-    // Add CSS animation
-    if (!document.getElementById('flip-animation-style')) {
-      const style = document.createElement('style');
-      style.id = 'flip-animation-style';
-      style.textContent = `
-        @keyframes fadeInOut {
-          0%, 100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-          20%, 80% { opacity: 1; transform: translateX(-50%) translateY(0); }
+      this.userNameTimeout = setTimeout(() => {
+        if (this.userNameDisplay) {
+          this.userNameDisplay.style.opacity = '0';
+          this.userNameDisplay.style.pointerEvents = 'none';
         }
-      `;
-      document.head.appendChild(style);
+      }, 5000);
     }
-
-    document.body.appendChild(feedback);
-    setTimeout(() => feedback.remove(), 2000);
   }
 
-  toggleAudio() {
-    if (this.localStream) {
-      const audioTrack = this.localStream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        this.isAudioEnabled = audioTrack.enabled;
-        this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
-      }
+  showError(message) {
+    if (this.nameError) {
+      this.nameError.textContent = message;
+      this.nameError.classList.remove('hidden');
+    }
+  }
+
+  showNotification(message, type = 'info') {
+    console.log(`📱 ${type.toUpperCase()}: ${message}`);
+    if (this.videoNotice) {
+      this.videoNotice.textContent = message;
+      this.videoNotice.className = `notification-banner ${type}`;
+      this.videoNotice.classList.remove('hidden');
+
+      setTimeout(() => {
+        this.videoNotice.classList.add('hidden');
+      }, 4000);
     }
   }
 
   leaveCall() {
-    if (this.socket) {
-      this.socket.emit('leave-room', { roomToken: this.roomToken });
-      this.socket.disconnect();
-    }
-
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
-    }
-
-    if (this.peerConnection) {
-      this.peerConnection.close();
-    }
-
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-
-    window.location.href = '/';
-  }
-
-  async shareLink() {
-    const currentUrl = window.location.href;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Join Video Call',
-          text: 'Join our video meeting',
-          url: currentUrl
-        });
-      } catch (error) {
-        console.log('Share cancelled or failed');
-      }
-    } else if (navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(currentUrl);
-        this.showNotification('Link copied to clipboard', 'success');
-      } catch (error) {
-        this.showNotification('Failed to copy link', 'error');
-      }
-    }
-  }
-
-  goBack() {
     if (confirm('Are you sure you want to leave the call?')) {
-      this.leaveCall();
+      this.cleanupCall();
+      window.location.href = '/';
     }
   }
 
-  toggleVideoSize() {
-    // Toggle between small and expanded video
-    const smallVideo = document.getElementById('smallVideo');
-    smallVideo.classList.toggle('expanded');
-    this.expandIcon.textContent = smallVideo.classList.contains('expanded') ? '↙' : '↗';
-  }
-
-  async toggleFullscreen() {
-    try {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement) {
-        // Enter fullscreen
-        const element = document.documentElement;
-        if (element.requestFullscreen) {
-          await element.requestFullscreen();
-        } else if (element.webkitRequestFullscreen) {
-          await element.webkitRequestFullscreen();
-        } else if (element.mozRequestFullScreen) {
-          await element.mozRequestFullScreen();
-        } else if (element.msRequestFullscreen) {
-          await element.msRequestFullscreen();
-        }
-
-        this.fullscreenBtn.innerHTML = `
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2"/>
-          </svg>
-        `;
-        this.fullscreenBtn.title = 'Exit fullscreen';
-        this.showNotification('Entered fullscreen mode', 'success');
-
-        // Hide mobile browser bars on fullscreen
-        if (screen.orientation && screen.orientation.lock) {
-          try {
-            await screen.orientation.lock('landscape');
-          } catch (e) {
-            console.log('Orientation lock not available');
-          }
-        }
-      } else {
-        // Exit fullscreen
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          await document.webkitExitFullscreen();
-        } else if (document.mozCancelFullScreen) {
-          await document.mozCancelFullScreen();
-        } else if (document.msExitFullscreen) {
-          await document.msExitFullscreen();
-        }
-
-        this.fullscreenBtn.innerHTML = `
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2"/>
-          </svg>
-        `;
-        this.fullscreenBtn.title = 'Toggle fullscreen';
-        this.showNotification('Exited fullscreen mode', 'success');
-
-        // Unlock orientation on exit
-        if (screen.orientation && screen.orientation.unlock) {
-          screen.orientation.unlock();
-        }
+  // TikTok-style Chat Functions
+  openChatOverlay() {
+    if (this.mobileChatOverlay) {
+      this.mobileChatOverlay.classList.add('active');
+      if (this.mobileChatInput) {
+        setTimeout(() => this.mobileChatInput.focus(), 300);
       }
-    } catch (error) {
-      console.error('Fullscreen error:', error);
-      this.showNotification('Fullscreen not supported', 'error');
     }
   }
 
-  // Chat functionality
-  openChat() {
-    this.mobileChatOverlay.classList.add('visible');
-    setTimeout(() => {
-      this.mobileChatInput.focus();
-    }, 300);
-    this.chatBubble.style.display = 'none';
-  }
-
-  closeChat() {
-    this.mobileChatOverlay.classList.remove('visible');
-    this.chatBubble.style.display = 'block';
+  closeChatOverlay() {
+    if (this.mobileChatOverlay) {
+      this.mobileChatOverlay.classList.remove('active');
+      this.clearReply();
+    }
   }
 
   sendMessage() {
-    const message = this.mobileChatInput.value.trim();
-    if (!message || !this.socket) return;
+    const messageText = this.mobileChatInput?.value.trim();
+    if (!messageText || !this.socket) return;
 
-    this.socket.emit('chat-message', {
-      roomToken: this.roomToken,
-      message: message,
-      from: this.displayName,
-      timestamp: Date.now()
-    });
-
-    this.addChatMessage({
-      message: message,
-      from: this.displayName,
+    const messageData = {
+      message: messageText,
       timestamp: Date.now(),
-      isOwn: true
-    });
+      participantId: this.socket.id,
+      displayName: this.displayName || 'Anonymous',
+      replyTo: this.currentReply
+    };
 
+    this.socket.emit('chat-message', messageData);
     this.mobileChatInput.value = '';
+    this.clearReply();
+
+    // Auto-close chat after sending on mobile
+    setTimeout(() => this.closeChatOverlay(), 1000);
   }
 
-  handleChatMessage(data) {
+  displayChatMessage(data) {
+    // Add to floating messages (TikTok style)
+    this.addFloatingMessage(data);
+
+    // Add to chat overlay
     this.addChatMessage(data);
+  }
 
-    // Show chat bubble with last message
-    this.lastChatMessage.textContent = `${data.from}: ${data.message}`;
-    this.chatBubble.classList.remove('hidden');
+  addFloatingMessage(data) {
+    if (!this.floatingMessages) return;
 
-    // Auto-hide chat bubble after 5 seconds
+    const messageEl = document.createElement('div');
+    messageEl.className = 'floating-message';
+
+    // Handle replies
+    if (data.replyTo) {
+      const replyEl = document.createElement('div');
+      replyEl.className = 'floating-reply';
+      replyEl.innerHTML = `<span class="reply-indicator">↪</span> ${data.replyTo.displayName}: ${data.replyTo.message.substring(0, 30)}...`;
+      messageEl.appendChild(replyEl);
+    }
+
+    const contentEl = document.createElement('div');
+    contentEl.className = 'floating-content';
+    contentEl.innerHTML = `
+      <div class="floating-author">${data.displayName}</div>
+      <div class="floating-text">${data.message}</div>
+    `;
+    messageEl.appendChild(contentEl);
+
+    // Add click handler for replies
+    messageEl.addEventListener('click', () => {
+      this.setReply(data);
+      this.openChatOverlay();
+    });
+
+    // Insert at top and animate
+    this.floatingMessages.insertBefore(messageEl, this.floatingMessages.firstChild);
+
+    // Remove old messages (keep max 5)
+    const messages = this.floatingMessages.querySelectorAll('.floating-message');
+    if (messages.length > 5) {
+      for (let i = 5; i < messages.length; i++) {
+        messages[i].remove();
+      }
+    }
+
+    // Auto-remove after 10 seconds
     setTimeout(() => {
-      this.chatBubble.classList.add('hidden');
-    }, 5000);
+      if (messageEl.parentNode) {
+        messageEl.style.animation = 'slideOutLeft 0.3s ease-in';
+        setTimeout(() => messageEl.remove(), 300);
+      }
+    }, 10000);
   }
 
   addChatMessage(data) {
-    const messageElement = document.createElement('div');
-    messageElement.className = `chat-message ${data.isOwn ? 'own' : 'other'}`;
+    if (!this.mobileChatMessages) return;
 
-    const time = new Date(data.timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    const messageEl = document.createElement('div');
+    messageEl.className = `chat-message ${data.participantId === this.socket?.id ? 'own' : ''}`;
 
-    messageElement.innerHTML = `
-      <div class="message-content">
-        <div class="message-author">${data.from}</div>
-        <div class="message-text">${data.message}</div>
-        <div class="message-time">${time}</div>
+    const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    messageEl.innerHTML = `
+      <div class="message-header">
+        <span class="message-author">${data.displayName}</span>
+        <span class="message-time">${time}</span>
       </div>
+      ${data.replyTo ? `
+        <div class="message-reply">
+          <span class="reply-indicator">↪</span>
+          <span class="reply-to">${data.replyTo.displayName}:</span>
+          <span class="reply-text">${data.replyTo.message}</span>
+        </div>
+      ` : ''}
+      <div class="message-content">${data.message}</div>
     `;
 
-    this.mobileChatMessages.appendChild(messageElement);
+    // Add click handler for replies
+    messageEl.addEventListener('click', () => {
+      if (data.participantId !== this.socket?.id) {
+        this.setReply(data);
+      }
+    });
+
+    // Remove welcome message if it exists
+    const welcome = this.mobileChatMessages.querySelector('.chat-welcome');
+    if (welcome) {
+      welcome.remove();
+    }
+
+    this.mobileChatMessages.appendChild(messageEl);
     this.mobileChatMessages.scrollTop = this.mobileChatMessages.scrollHeight;
   }
 
-  // Timer functionality
-  startCallTimer() {
-    this.callStartTime = Date.now();
-    this.timerInterval = setInterval(() => {
-      const elapsed = Date.now() - this.callStartTime;
-      const minutes = Math.floor(elapsed / 60000);
-      const seconds = Math.floor((elapsed % 60000) / 1000);
-      this.timerValue.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }, 1000);
+  setReply(messageData) {
+    if (!this.replyPreview || !messageData) return;
+
+    this.currentReply = {
+      participantId: messageData.participantId,
+      displayName: messageData.displayName,
+      message: messageData.message
+    };
+
+    this.replyToName.textContent = messageData.displayName;
+    this.replyMessage.textContent = messageData.message.length > 50
+      ? messageData.message.substring(0, 50) + '...'
+      : messageData.message;
+
+    this.replyPreview.style.display = 'block';
+
+    if (this.mobileChatInput) {
+      this.mobileChatInput.focus();
+    }
   }
 
-  // User name display functionality
-  showUserNameTemporarily() {
-    this.userNameDisplay.style.opacity = '1';
-    this.userNameDisplay.style.pointerEvents = 'auto';
+  clearReply() {
+    if (this.replyPreview) {
+      this.replyPreview.style.display = 'none';
+      this.currentReply = null;
+    }
+  }
 
+  cleanupCall() {
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+    }
+    this.peerConnections.forEach(pc => pc.close());
+    if (this.socket) {
+      this.socket.disconnect();
+    }
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
     if (this.userNameTimeout) {
       clearTimeout(this.userNameTimeout);
     }
-
-    this.userNameTimeout = setTimeout(() => {
-      this.userNameDisplay.style.opacity = '0';
-      this.userNameDisplay.style.pointerEvents = 'none';
-    }, 5000);
   }
 
-  showUserName() {
-    this.showUserNameTemporarily();
+  handleBeforeUnload() {
+    this.cleanupCall();
   }
 
-  // Controls visibility toggle
-  toggleControlsVisibility() {
-    const isHidden = this.bottomControls.classList.contains('hidden-controls');
-
-    if (isHidden) {
-      this.bottomControls.classList.remove('hidden-controls');
-      this.callTimer.classList.remove('hidden-controls');
-    } else {
-      this.bottomControls.classList.add('hidden-controls');
-      this.callTimer.classList.add('hidden-controls');
-    }
-
-    // Auto-show controls after 5 seconds
-    if (!isHidden) {
-      setTimeout(() => {
-        this.bottomControls.classList.remove('hidden-controls');
-        this.callTimer.classList.remove('hidden-controls');
-      }, 5000);
-    }
-  }
-
-  // Notification system
-  showNotification(message, type = 'info') {
-    this.videoNotice.textContent = message;
-    this.videoNotice.className = `notification-banner ${type}`;
-    this.videoNotice.classList.remove('hidden');
-
+  handleOrientationChange() {
+    // Handle mobile orientation changes
     setTimeout(() => {
-      this.videoNotice.classList.add('hidden');
-    }, 4000);
-  }
-
-  async handleVisibilityChange() {
-    if (document.hidden) {
-      // Browser is not visible, try to enter PiP mode
-      await this.enterPictureInPicture();
-    } else {
-      // Browser is visible again, exit PiP mode
-      await this.exitPictureInPicture();
-    }
-  }
-
-  async enterPictureInPicture() {
-    try {
-      // Only enter PiP if we have video playing and PiP is supported
-      const activeVideo = this.remoteVideo.srcObject ? this.remoteVideo : this.localVideo;
-
-      if (activeVideo && activeVideo.srcObject && 'pictureInPictureEnabled' in document) {
-        if (document.pictureInPictureElement) {
-          return; // Already in PiP mode
-        }
-
-        await activeVideo.requestPictureInPicture();
-        console.log('Entered Picture-in-Picture mode');
-        this.showNotification('Video minimized', 'info');
-      }
-    } catch (error) {
-      console.log('Picture-in-Picture not available or failed:', error.message);
-    }
-  }
-
-  async exitPictureInPicture() {
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-        console.log('Exited Picture-in-Picture mode');
-      }
-    } catch (error) {
-      console.error('Error exiting Picture-in-Picture:', error);
-    }
-  }
-
-  handleDisconnection() {
-    console.log('📱 Handling mobile disconnection');
-
-    // Initialize reconnection properties if they don't exist
-    if (!this.reconnectAttempts) this.reconnectAttempts = 0;
-    if (!this.maxReconnectAttempts) this.maxReconnectAttempts = 50;
-
-    // Start aggressive reconnection for mobile sessions
-    if (!this.reconnectInterval) {
-      this.reconnectInterval = setInterval(() => {
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.reconnectAttempts++;
-          console.log(`📱 Mobile reconnection attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-
-          if (this.socket && !this.socket.connected) {
-            this.socket.connect();
-          }
-        } else {
-          clearInterval(this.reconnectInterval);
-          this.reconnectInterval = null;
-          this.showNotification('Connection lost. Please refresh the page.', 'error');
-        }
-      }, 5000);
-    }
-  }
-
-  async rejoinRoom() {
-    if (this.socket && this.roomToken && this.displayName) {
-      console.log('🔄 Mobile rejoining room after reconnection');
-
-      // First rejoin the room
-      this.socket.emit('join-room', {
-        roomToken: this.roomToken,
-        displayName: this.displayName
-      });
-
-      // Then attempt to restore media if it was lost
-      await this.attemptMediaRecovery();
-
-      // Reset reconnection counter on successful rejoin
-      this.reconnectAttempts = 0;
-      if (this.reconnectInterval) {
-        clearInterval(this.reconnectInterval);
-        this.reconnectInterval = null;
-      }
-    }
-  }
-
-  async attemptMediaRecovery() {
-    try {
-      console.log('🔧 Attempting mobile media recovery...');
-
-      // Check if local stream is still active
-      if (!this.localStream || this.localStream.getTracks().some(track => track.readyState !== 'live')) {
-        console.log('📹 Mobile local stream lost, attempting to restore...');
-
-        // Try to get media again with current preferences
-        await this.initializeMedia();
-
-        // If successful and we have a peer connection, update it
-        if (this.peerConnection && this.peerConnection.connectionState !== 'closed') {
-          try {
-            // Replace tracks in existing connection
-            const videoTrack = this.localStream.getVideoTracks()[0];
-            const audioTrack = this.localStream.getAudioTracks()[0];
-
-            const senders = this.peerConnection.getSenders();
-            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-            const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
-
-            if (videoSender && videoTrack) {
-              await videoSender.replaceTrack(videoTrack);
-              console.log('✅ Mobile video track replaced');
-            }
-
-            if (audioSender && audioTrack) {
-              await audioSender.replaceTrack(audioTrack);
-              console.log('✅ Mobile audio track replaced');
-            }
-          } catch (error) {
-            console.error('❌ Failed to replace mobile tracks:', error);
-            // If track replacement fails, recreate peer connection
-            await this.createPeerConnection();
-          }
-        }
-
-        this.showNotification('Media connection restored', 'success');
-        console.log('🎉 Mobile media recovery completed successfully');
-      } else {
-        console.log('✅ Mobile media stream is healthy, no recovery needed');
-      }
-    } catch (error) {
-      console.error('💥 Mobile media recovery failed:', error);
-      this.showNotification('Unable to restore video/audio. Continuing with chat only.', 'warning');
-    }
+      console.log('📱 Orientation changed');
+    }, 100);
   }
 }
 
-// Initialize the mobile video call when DOM is ready
+// Initialize when DOM is ready
+console.log('⏳ Waiting for mobile DOM to be ready...');
 document.addEventListener('DOMContentLoaded', () => {
-  new MobileVideoCall();
+  console.log('✅ Mobile DOM ready, initializing MobileVideoCall...');
+  window.mobileCall = new MobileVideoCall();
 });
+
+console.log('📱 Mobile.js loaded successfully');
