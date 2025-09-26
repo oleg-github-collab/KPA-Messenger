@@ -701,16 +701,17 @@ app.post('/api/meetings', async (req, res) => {
 
     // Store meeting data (Redis or in-memory fallback)
     try {
-      if (redis && isRedisConnected) {
-        await RedisHelper.createMeeting(roomToken, hostName || 'host');
-        await RedisHelper.updateSession(roomToken, {
-          createdBy: hostName || 'host',
-          createdAt: new Date().toISOString(),
-          userAgent: req.headers['user-agent']
-        });
-      }
+      await RedisHelper.createMeeting(roomToken, hostName || 'host');
+      await RedisHelper.updateSession(roomToken, {
+        createdBy: hostName || 'host',
+        createdAt: new Date().toISOString(),
+        userAgent: req.headers['user-agent'],
+        maxParticipants,
+        expiresAt
+      });
     } catch (error) {
-      // Fallback to in-memory storage handled by SafeRedis
+      console.error('Error storing meeting data:', error);
+      // Continue with response even if storage fails
     }
 
     res.json({
@@ -1062,185 +1063,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Express polls system
-  socket.on('create-poll', async (data) => {
-    const { roomToken, title, options, duration, anonymous, type } = data;
-
-    try {
-      const meeting = await RedisHelper.getMeeting(roomToken);
-      if (!meeting) return;
-
-      const poll = await RedisHelper.createPoll(roomToken, {
-        title,
-        options,
-        type: type || 'multiple_choice',
-        duration,
-        anonymous: anonymous || false,
-        creator: currentUser
-      });
-
-      const room = rooms.get(roomToken);
-      if (room) {
-        room.polls.set(poll.id, {
-          ...poll,
-          votes: {},
-          createdAt: Date.now(),
-          expiresAt: Date.now() + duration * 1000
-        });
-      }
-
-      io.to(roomToken).emit('poll-created', poll);
-
-      // Auto-close poll
-      setTimeout(() => {
-        const finalPoll = rooms.get(roomToken)?.polls.get(poll.id);
-        if (finalPoll) {
-          finalPoll.status = 'closed';
-          io.to(roomToken).emit('poll-closed', {
-            pollId: poll.id,
-            results: finalPoll.votes
-          });
-        }
-      }, duration * 1000);
-
-    } catch (error) {
-      console.error('Error creating poll:', error);
-    }
-  });
-
-  socket.on('vote-poll', async (data) => {
-    const { roomToken, pollId, optionIndex } = data;
-
-    try {
-      const meeting = await RedisHelper.getMeeting(roomToken);
-      if (!meeting) return;
-
-      await RedisHelper.addPollVote(roomToken, pollId, currentUser, optionIndex);
-
-      const room = rooms.get(roomToken);
-      if (room && room.polls.has(pollId)) {
-        const pollData = room.polls.get(pollId);
-        pollData.votes[currentUser] = optionIndex;
-
-        io.to(roomToken).emit('poll-updated', {
-          pollId,
-          votes: pollData.votes,
-          totalVotes: Object.keys(pollData.votes).length
-        });
-      }
-
-    } catch (error) {
-      console.error('Error voting on poll:', error);
-    }
-  });
-
-  // Emotional feedback system
-  socket.on('emotion-update', async (data) => {
-    const { roomToken, emotion, intensity } = data;
-
-    try {
-      const meeting = await RedisHelper.getMeeting(roomToken);
-      if (!meeting) return;
-
-      // Update emotion and get climate
-      const climate = await RedisHelper.addEmotion(roomToken, currentUser, emotion);
-
-      // Update room emotional climate
-      const room = rooms.get(roomToken);
-      if (room) {
-        room.emotions[currentUser] = { emotion, intensity, timestamp: Date.now() };
-
-        io.to(roomToken).emit('emotional-climate-update', {
-          participant: currentUser,
-          emotion,
-          intensity,
-          climate
-        });
-      }
-
-    } catch (error) {
-      console.error('Error updating emotion:', error);
-    }
-  });
-
-  // Rapid sociometry system
-  socket.on('start-sociometric-test', async (data) => {
-    const { roomToken, template, duration, questions } = data;
-
-    try {
-      const meeting = await RedisHelper.getMeeting(roomToken);
-      if (!meeting) return;
-
-      const participants = await RedisHelper.getParticipants(roomToken);
-
-      const test = await RedisHelper.createSociometryTest(roomToken, {
-        template,
-        title: `${template} Test`,
-        questions,
-        duration,
-        host: currentUser,
-        participants: participants.map(p => p.name)
-      });
-
-      const room = rooms.get(roomToken);
-      if (room) {
-        room.tests.set(test.id, {
-          ...test,
-          startedAt: Date.now(),
-          endsAt: Date.now() + duration * 1000,
-          responses: {}
-        });
-      }
-
-      io.to(roomToken).emit('sociometric-test-started', test);
-
-      // Auto-end test
-      setTimeout(() => {
-        const finalTest = rooms.get(roomToken)?.tests.get(test.id);
-        if (finalTest) {
-          finalTest.status = 'completed';
-          const results = analyzeSociometricResults(finalTest.responses);
-
-          io.to(roomToken).emit('sociometric-test-completed', {
-            testId: test.id,
-            results
-          });
-        }
-      }, duration * 1000);
-
-    } catch (error) {
-      console.error('Error starting sociometric test:', error);
-    }
-  });
-
-  socket.on('submit-sociometric-response', async (data) => {
-    const { roomToken, testId, answers, responseTime } = data;
-
-    try {
-      const meeting = await RedisHelper.getMeeting(roomToken);
-      if (!meeting) return;
-
-      const test = await RedisHelper.getSociometryTest(roomToken, testId);
-      if (!test) return;
-
-      await RedisHelper.addSociometryResponse(roomToken, testId, currentUser, answers);
-
-      const room = rooms.get(roomToken);
-      if (room && room.tests.has(testId)) {
-        const testData = room.tests.get(testId);
-        testData.responses[currentUser] = { answers, responseTime, submittedAt: Date.now() };
-
-        io.to(roomToken).emit('sociometric-response-received', {
-          testId,
-          participant: currentUser,
-          totalResponses: Object.keys(testData.responses).length
-        });
-      }
-
-    } catch (error) {
-      console.error('Error submitting sociometric response:', error);
-    }
-  });
 
   // Enhanced disconnect handling
   socket.on('disconnect', async () => {
@@ -1258,7 +1080,10 @@ io.on('connection', (socket) => {
           room.participants.delete(socket.id);
 
           if (room.participants.size === 0) {
+            // Complete cleanup when room is empty
+            await RedisHelper.deleteMeeting(currentRoom);
             rooms.delete(currentRoom);
+            console.log(`Room ${currentRoom} completely cleaned up - no participants remaining`);
           } else {
             socket.to(currentRoom).emit('user-left', {
               socketId: socket.id,
@@ -1290,6 +1115,13 @@ io.on('connection', (socket) => {
         const room = rooms.get(currentRoom);
         if (room) {
           room.participants.delete(socket.id);
+
+          if (room.participants.size === 0) {
+            // Complete cleanup when room is empty
+            await RedisHelper.deleteMeeting(currentRoom);
+            rooms.delete(currentRoom);
+            console.log(`Room ${currentRoom} completely cleaned up after leave`);
+          }
         }
 
         currentRoom = null;
