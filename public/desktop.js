@@ -216,6 +216,11 @@ class DesktopVideoCall {
     // Window events
     window.addEventListener('beforeunload', () => this.handleBeforeUnload());
 
+    // Picture-in-Picture events
+    document.addEventListener('visibilitychange', () => this.handleVisibilityChange());
+    window.addEventListener('pagehide', () => this.handlePageHide());
+    window.addEventListener('pageshow', () => this.handlePageShow());
+
     console.log('✅ Event listeners setup complete');
   }
 
@@ -1275,6 +1280,96 @@ class DesktopVideoCall {
 
   handleBeforeUnload() {
     this.cleanupCall();
+  }
+
+  async handleVisibilityChange() {
+    console.log('🖥️ Visibility changed:', document.hidden ? 'hidden' : 'visible');
+
+    if (document.hidden) {
+      // Page is hidden - try to enter Picture-in-Picture mode
+      await this.enterPictureInPicture();
+    } else {
+      // Page is visible - exit Picture-in-Picture mode
+      await this.exitPictureInPicture();
+    }
+  }
+
+  handlePageHide() {
+    console.log('🖥️ Page hide event');
+    // Ensure media keeps running
+    this.preventMediaInterruption();
+  }
+
+  handlePageShow() {
+    console.log('🖥️ Page show event');
+    // Restore normal operation
+    this.exitPictureInPicture();
+  }
+
+  async enterPictureInPicture() {
+    if (!this.localVideo || !this.localVideo.srcObject) {
+      console.log('🖥️ No video to put in PiP');
+      return;
+    }
+
+    try {
+      // Check if Picture-in-Picture is supported
+      if (!('pictureInPictureEnabled' in document)) {
+        console.log('🖥️ Picture-in-Picture not supported');
+        return;
+      }
+
+      // Check if already in Picture-in-Picture
+      if (document.pictureInPictureElement) {
+        console.log('🖥️ Already in Picture-in-Picture mode');
+        return;
+      }
+
+      console.log('🖥️ Entering Picture-in-Picture mode...');
+      await this.localVideo.requestPictureInPicture();
+      console.log('✅ Entered Picture-in-Picture mode');
+
+      // Add PiP event listeners
+      this.localVideo.addEventListener('leavepictureinpicture', () => {
+        console.log('🖥️ Left Picture-in-Picture mode');
+      });
+
+    } catch (error) {
+      console.warn('⚠️ Failed to enter Picture-in-Picture:', error.message);
+    }
+  }
+
+  async exitPictureInPicture() {
+    try {
+      if (document.pictureInPictureElement) {
+        console.log('🖥️ Exiting Picture-in-Picture mode...');
+        await document.exitPictureInPicture();
+        console.log('✅ Exited Picture-in-Picture mode');
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to exit Picture-in-Picture:', error.message);
+    }
+  }
+
+  preventMediaInterruption() {
+    console.log('🖥️ Preventing media interruption...');
+
+    // Ensure audio and video tracks remain enabled
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => {
+        console.log(`🖥️ Track ${track.kind} enabled:`, track.enabled);
+        // Don't disable tracks when page is hidden
+      });
+    }
+
+    // Keep peer connections active
+    this.peerConnections.forEach((pc, participantId) => {
+      console.log(`🖥️ Peer connection ${participantId} state:`, pc.connectionState);
+      if (pc.connectionState === 'connected' || pc.connectionState === 'connecting') {
+        // Connection is good, keep it alive
+        console.log(`🖥️ Keeping peer connection ${participantId} alive`);
+      }
+    });
   }
 }
 

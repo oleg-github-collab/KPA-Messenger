@@ -1134,17 +1134,20 @@ body {
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
   z-index: var(--z-chat);
-  display: none;
+  display: flex;
   flex-direction: column;
   opacity: 0;
   visibility: hidden;
-  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform: translateY(100%);
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  pointer-events: none;
 }
 
 .mobile-chat-overlay.active {
-  display: flex;
   opacity: 1;
   visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 .mobile-chat-header {
