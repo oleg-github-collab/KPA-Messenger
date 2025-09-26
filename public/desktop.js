@@ -455,14 +455,20 @@ class DesktopVideoCall {
     // Update video toggle button
     if (this.videoToggleBtn) {
       this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
+      this.videoToggleBtn.classList.toggle('muted', !this.isVideoEnabled);
       this.videoToggleBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
     }
 
     // Update audio toggle button
     if (this.audioToggleBtn) {
       this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
+      this.audioToggleBtn.classList.toggle('muted', !this.isAudioEnabled);
       this.audioToggleBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
     }
+
+    // Call specific update functions for visual states
+    this.updateVideoUI();
+    this.updateAudioUI();
 
     // Update sidebar controls
     const selfVideoBtn = document.getElementById('toggleSelfVideo');
@@ -866,6 +872,18 @@ class DesktopVideoCall {
       this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
       this.videoToggleBtn.classList.toggle('muted', !this.isVideoEnabled);
       this.videoToggleBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
+
+      // Update icon visual state
+      const svg = this.videoToggleBtn.querySelector('svg');
+      if (svg) {
+        if (this.isVideoEnabled) {
+          svg.style.opacity = '1';
+          svg.style.filter = 'none';
+        } else {
+          svg.style.opacity = '0.6';
+          svg.style.filter = 'grayscale(1)';
+        }
+      }
     }
 
     if (this.isVideoEnabled) {
@@ -921,6 +939,18 @@ class DesktopVideoCall {
       this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
       this.audioToggleBtn.classList.toggle('muted', !this.isAudioEnabled);
       this.audioToggleBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
+
+      // Update icon visual state
+      const svg = this.audioToggleBtn.querySelector('svg');
+      if (svg) {
+        if (this.isAudioEnabled) {
+          svg.style.opacity = '1';
+          svg.style.filter = 'none';
+        } else {
+          svg.style.opacity = '0.6';
+          svg.style.filter = 'grayscale(1)';
+        }
+      }
     }
   }
 
@@ -1056,16 +1086,23 @@ class DesktopVideoCall {
 
   // Chat Functions
   openChat() {
+    this.desktopChatOverlay.style.display = 'block';
     this.desktopChatOverlay.classList.add('active');
     this.desktopChatInput.focus();
     this.chatBubble.classList.add('hidden');
+    this.chatBubble.style.display = 'none';
   }
 
   closeChat() {
     console.log('Closing chat...');
     if (this.desktopChatOverlay) {
+      this.desktopChatOverlay.style.display = 'none';
       this.desktopChatOverlay.classList.remove('active');
       console.log('Chat overlay closed');
+    }
+    if (this.chatBubble) {
+      this.chatBubble.classList.remove('hidden');
+      this.chatBubble.style.display = 'flex';
     }
     if (this.assistantPanel) {
       this.assistantPanel.classList.remove('active');
