@@ -1307,8 +1307,11 @@ class DesktopVideoCall {
   }
 
   async enterPictureInPicture() {
-    if (!this.localVideo || !this.localVideo.srcObject) {
-      console.log('🖥️ No video to put in PiP');
+    // Try remote video first (more important to see other participants)
+    const videoToUse = (this.remoteVideo && this.remoteVideo.srcObject) ? this.remoteVideo : this.localVideo;
+
+    if (!videoToUse || !videoToUse.srcObject) {
+      console.log('🖥️ No video stream available for PiP');
       return;
     }
 
@@ -1325,17 +1328,27 @@ class DesktopVideoCall {
         return;
       }
 
-      console.log('🖥️ Entering Picture-in-Picture mode...');
-      await this.localVideo.requestPictureInPicture();
+      console.log('🖥️ Entering Picture-in-Picture mode with', videoToUse === this.remoteVideo ? 'remote' : 'local', 'video...');
+      await videoToUse.requestPictureInPicture();
       console.log('✅ Entered Picture-in-Picture mode');
 
       // Add PiP event listeners
-      this.localVideo.addEventListener('leavepictureinpicture', () => {
+      videoToUse.addEventListener('leavepictureinpicture', () => {
         console.log('🖥️ Left Picture-in-Picture mode');
       });
 
     } catch (error) {
       console.warn('⚠️ Failed to enter Picture-in-Picture:', error.message);
+      // Fallback: try the other video if available
+      if (videoToUse === this.remoteVideo && this.localVideo && this.localVideo.srcObject) {
+        console.log('🖥️ Trying fallback to local video...');
+        try {
+          await this.localVideo.requestPictureInPicture();
+          console.log('✅ Entered Picture-in-Picture mode with local video');
+        } catch (fallbackError) {
+          console.warn('⚠️ Fallback also failed:', fallbackError.message);
+        }
+      }
     }
   }
 

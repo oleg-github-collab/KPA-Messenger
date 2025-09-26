@@ -716,133 +716,6 @@ class MobileVideoCall {
     console.log('✅ Mobile chat closed successfully');
   }
 
-  sendMessage() {
-    const message = this.mobileChatInput?.value.trim();
-    if (!message || !this.socket) return;
-
-    const messageData = {
-      roomToken: this.roomToken,
-      message: message,
-      from: this.displayName,
-      timestamp: Date.now()
-    };
-
-    // Add reply information if replying
-    if (this.currentReply) {
-      messageData.replyTo = this.currentReply;
-    }
-
-    this.socket.emit('chat-message', messageData);
-
-    this.addChatMessage({
-      ...messageData,
-      isOwn: true
-    });
-
-    // Show floating message
-    this.addFloatingMessage({
-      ...messageData,
-      isOwn: true
-    });
-
-    if (this.mobileChatInput) this.mobileChatInput.value = '';
-    this.cancelReply();
-  }
-
-  addChatMessage(data) {
-    if (!this.mobileChatMessages) return;
-
-    const messageElement = document.createElement('div');
-    messageElement.className = `chat-message ${data.isOwn ? 'own' : 'other'}`;
-
-    const time = new Date(data.timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    let replyHtml = '';
-    if (data.replyTo) {
-      replyHtml = `
-        <div class="reply-info">
-          <span class="reply-to-name">${data.replyTo.from}</span>
-          <span class="reply-to-message">${data.replyTo.message}</span>
-        </div>
-      `;
-    }
-
-    messageElement.innerHTML = `
-      <div class="message-header">
-        <span class="message-author">${data.from}</span>
-        <span class="message-time">${time}</span>
-      </div>
-      ${replyHtml}
-      <div class="message-bubble" data-message-id="${data.timestamp}" data-from="${data.from}" data-message="${data.message}">
-        ${data.message}
-      </div>
-    `;
-
-    // Add click handler for reply
-    const messageBubble = messageElement.querySelector('.message-bubble');
-    messageBubble.addEventListener('click', () => {
-      if (!data.isOwn) {
-        this.setReply(data);
-      }
-    });
-
-    this.mobileChatMessages.appendChild(messageElement);
-    this.mobileChatMessages.scrollTop = this.mobileChatMessages.scrollHeight;
-
-    // Remove welcome message if it exists
-    const welcomeMessage = this.mobileChatMessages.querySelector('.chat-welcome');
-    if (welcomeMessage) {
-      welcomeMessage.remove();
-    }
-  }
-
-  addFloatingMessage(data) {
-    if (!this.floatingMessages) return;
-
-    const floatingElement = document.createElement('div');
-    floatingElement.className = `floating-message ${data.isOwn ? 'own' : 'other'}`;
-
-    const time = new Date(data.timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    floatingElement.innerHTML = `
-      <div class="floating-message-header">
-        <span class="floating-message-author">${data.from}</span>
-        <span class="floating-message-time">${time}</span>
-      </div>
-      <div class="floating-message-text">${data.message}</div>
-    `;
-
-    // Add click handler to open chat
-    floatingElement.addEventListener('click', () => {
-      this.openChat();
-    });
-
-    this.floatingMessages.appendChild(floatingElement);
-
-    // Remove old messages if too many
-    const messages = this.floatingMessages.querySelectorAll('.floating-message');
-    if (messages.length > 5) {
-      messages[0].remove();
-    }
-
-    // Auto-hide after 10 seconds
-    setTimeout(() => {
-      if (floatingElement.parentNode) {
-        floatingElement.style.opacity = '0';
-        setTimeout(() => {
-          if (floatingElement.parentNode) {
-            floatingElement.remove();
-          }
-        }, 300);
-      }
-    }, 10000);
-  }
 
   handleChatMessage(data) {
     console.log('📱 Received chat message:', data);
@@ -1116,17 +989,24 @@ class MobileVideoCall {
 
   sendMessage() {
     const messageText = this.mobileChatInput?.value.trim();
-    if (!messageText || !this.socket) return;
+    if (!messageText || !this.socket || !this.roomToken) return;
 
     const messageData = {
+      roomToken: this.roomToken,
       message: messageText,
       timestamp: Date.now(),
       participantId: this.socket.id,
       displayName: this.displayName || 'Anonymous',
+      from: this.displayName || 'Anonymous',
       replyTo: this.currentReply
     };
 
+    // Send message to server
     this.socket.emit('chat-message', messageData);
+
+    // Display own message immediately
+    this.displayChatMessage(messageData);
+
     this.mobileChatInput.value = '';
     this.clearReply();
 
@@ -1313,8 +1193,11 @@ class MobileVideoCall {
   }
 
   async enterPictureInPicture() {
-    if (!this.localVideo || !this.localVideo.srcObject) {
-      console.log('📱 No video to put in PiP');
+    // Try remote video first (more important to see other participants)
+    const videoToUse = (this.remoteVideo && this.remoteVideo.srcObject) ? this.remoteVideo : this.localVideo;
+
+    if (!videoToUse || !videoToUse.srcObject) {
+      console.log('📱 No video stream available for PiP');
       return;
     }
 
@@ -1331,17 +1214,27 @@ class MobileVideoCall {
         return;
       }
 
-      console.log('📱 Entering Picture-in-Picture mode...');
-      await this.localVideo.requestPictureInPicture();
+      console.log('📱 Entering Picture-in-Picture mode with', videoToUse === this.remoteVideo ? 'remote' : 'local', 'video...');
+      await videoToUse.requestPictureInPicture();
       console.log('✅ Entered Picture-in-Picture mode');
 
       // Add PiP event listeners
-      this.localVideo.addEventListener('leavepictureinpicture', () => {
+      videoToUse.addEventListener('leavepictureinpicture', () => {
         console.log('📱 Left Picture-in-Picture mode');
       });
 
     } catch (error) {
       console.warn('⚠️ Failed to enter Picture-in-Picture:', error.message);
+      // Fallback: try the other video if available
+      if (videoToUse === this.remoteVideo && this.localVideo && this.localVideo.srcObject) {
+        console.log('📱 Trying fallback to local video...');
+        try {
+          await this.localVideo.requestPictureInPicture();
+          console.log('✅ Entered Picture-in-Picture mode with local video');
+        } catch (fallbackError) {
+          console.warn('⚠️ Fallback also failed:', fallbackError.message);
+        }
+      }
     }
   }
 
