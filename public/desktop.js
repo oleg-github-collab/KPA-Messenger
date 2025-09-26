@@ -967,13 +967,17 @@ class DesktopVideoCall {
 
   // Participant Management
   addParticipant(participant) {
+    console.log('➕ Adding participant to desktop UI:', participant.displayName);
     this.participants.set(participant.id, participant);
     this.updateParticipantsCount();
+    this.updateParticipantsList();
   }
 
   removeParticipant(participantId) {
+    console.log('➖ Removing participant from desktop UI:', participantId);
     this.participants.delete(participantId);
     this.updateParticipantsCount();
+    this.updateParticipantsList();
   }
 
   updateParticipantsCount() {
@@ -981,6 +985,43 @@ class DesktopVideoCall {
     if (this.participantsCount) {
       this.participantsCount.textContent = `Participants (${count})`;
     }
+  }
+
+  updateParticipantsList() {
+    if (!this.participantList) return;
+
+    console.log('🔄 Updating desktop participants list UI');
+
+    // Clear all non-self participants
+    const existingParticipants = this.participantList.querySelectorAll('.participant-item:not([data-peer="self"])');
+    existingParticipants.forEach(item => item.remove());
+
+    // Add all participants except self
+    this.participants.forEach((participant, id) => {
+      if (participant.isLocal) return; // Skip self
+
+      const participantEl = document.createElement('div');
+      participantEl.className = 'participant-item';
+      participantEl.setAttribute('data-peer', id);
+
+      participantEl.innerHTML = `
+        <div class="participant-avatar">${participant.displayName.charAt(0).toUpperCase()}
+          <div class="online-indicator"></div>
+        </div>
+        <div class="participant-info">
+          <div class="participant-name">${participant.displayName}</div>
+          <div class="participant-status">Connected</div>
+        </div>
+        <div class="participant-controls">
+          <button class="control-btn" title="Participant audio">🎤</button>
+          <button class="control-btn" title="Participant video">📹</button>
+        </div>
+      `;
+
+      this.participantList.appendChild(participantEl);
+    });
+
+    console.log(`✅ Desktop participants list updated: ${this.participants.size} total participants`);
   }
 
   // Utility Functions

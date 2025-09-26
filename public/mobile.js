@@ -117,7 +117,7 @@ class MobileVideoCall {
     }
 
     if (this.chatButton) {
-      this.chatButton.addEventListener('click', () => this.openChat());
+      this.chatButton.addEventListener('click', () => this.openChatOverlay());
     }
 
     if (this.backButton) {
@@ -898,14 +898,26 @@ class MobileVideoCall {
     };
 
     peerConnection.ontrack = (event) => {
-      console.log('📱 Received remote stream from:', participantId);
-      const participant = this.participants.get(participantId);
-      if (participant) {
-        participant.stream = event.streams[0];
-        this.updateRemoteVideo(event.streams[0], participant.displayName);
-        console.log('🎥 Remote video stream assigned to participant:', participant.displayName);
+      console.log('📱 Received remote stream from:', participantId, 'Event:', event);
+      console.log('📱 Streams in event:', event.streams.length);
+      console.log('📱 Tracks in event:', event.track);
+
+      if (event.streams && event.streams.length > 0) {
+        const stream = event.streams[0];
+        console.log('📱 Stream tracks:', stream.getTracks().map(t => `${t.kind}:${t.enabled}`));
+
+        const participant = this.participants.get(participantId);
+        if (participant) {
+          participant.stream = stream;
+          this.updateRemoteVideo(stream, participant.displayName);
+          console.log('🎥 Remote video stream assigned to participant:', participant.displayName);
+        } else {
+          console.warn('⚠️ Received stream but participant not found:', participantId);
+          // Try to update video anyway in case participant isn't properly tracked
+          this.updateRemoteVideo(stream, `User ${participantId.substring(0, 8)}`);
+        }
       } else {
-        console.warn('⚠️ Received stream but participant not found:', participantId);
+        console.error('❌ No streams in ontrack event');
       }
     };
 
@@ -998,8 +1010,10 @@ class MobileVideoCall {
 
   // Participant Management
   addParticipant(participant) {
+    console.log('➕ Adding participant to mobile:', participant.displayName);
     this.participants.set(participant.id, participant);
     console.log('📱 Added participant:', participant.displayName);
+    console.log('📱 Total participants on mobile:', this.participants.size);
   }
 
   removeParticipant(participantId) {
@@ -1008,6 +1022,7 @@ class MobileVideoCall {
       console.log('📱 Removed participant:', participant.displayName);
     }
     this.participants.delete(participantId);
+    console.log('📱 Total participants on mobile:', this.participants.size);
   }
 
   // Utility Functions
