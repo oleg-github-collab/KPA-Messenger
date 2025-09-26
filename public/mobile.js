@@ -76,6 +76,10 @@ class MobileVideoCall {
     this.mainVideo.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: true });
     this.mainVideo.addEventListener('touchend', this.handleTouchEnd.bind(this), { passive: true });
 
+    // Local video tap to flip camera
+    this.localVideo.addEventListener('click', this.flipCamera.bind(this));
+    this.localPlaceholder.addEventListener('click', this.flipCamera.bind(this));
+
     // Control buttons
     this.videoToggleBtn.addEventListener('click', this.toggleVideo.bind(this));
     this.audioToggleBtn.addEventListener('click', this.toggleAudio.bind(this));
@@ -487,6 +491,120 @@ class MobileVideoCall {
     }
   }
 
+  async flipCamera() {
+    if (!this.isVideoEnabled || !this.localStream) return;
+
+    try {
+      // Get current facing mode
+      const videoTrack = this.localStream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      const currentFacing = settings.facingMode || 'user';
+
+      // Determine new facing mode
+      const newFacing = currentFacing === 'user' ? 'environment' : 'user';
+
+      // Get new stream with flipped camera
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: newFacing,
+          width: { ideal: 640, min: 320 },
+          height: { ideal: 480, min: 240 }
+        },
+        audio: false // Keep existing audio
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+
+      // Replace track in existing stream
+      if (this.localStream) {
+        const oldVideoTrack = this.localStream.getVideoTracks()[0];
+        if (oldVideoTrack) {
+          this.localStream.removeTrack(oldVideoTrack);
+          oldVideoTrack.stop();
+        }
+        this.localStream.addTrack(newVideoTrack);
+      }
+
+      // Update video element
+      this.localVideo.srcObject = this.localStream;
+
+      // Update all peer connections
+      this.updatePeerConnections(newVideoTrack);
+
+      // Show feedback
+      this.showFlipFeedback(newFacing);
+
+    } catch (error) {
+      console.error('Failed to flip camera:', error);
+      // Show notification
+      const notification = document.createElement('div');
+      notification.className = 'flip-notification';
+      notification.textContent = 'Camera flip not available';
+      notification.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 14px;
+        z-index: 1000;
+      `;
+      document.body.appendChild(notification);
+      setTimeout(() => notification.remove(), 2000);
+    }
+  }
+
+  updatePeerConnections(newVideoTrack) {
+    if (this.peerConnection && this.peerConnection.connectionState !== 'closed') {
+      const senders = this.peerConnection.getSenders();
+      const videoSender = senders.find(sender =>
+        sender.track && sender.track.kind === 'video'
+      );
+
+      if (videoSender) {
+        videoSender.replaceTrack(newVideoTrack);
+      }
+    }
+  }
+
+  showFlipFeedback(facingMode) {
+    const feedback = document.createElement('div');
+    feedback.className = 'flip-feedback';
+    feedback.textContent = facingMode === 'user' ? '📷 Front camera' : '📷 Back camera';
+    feedback.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 16px;
+      font-size: 12px;
+      z-index: 1000;
+      animation: fadeInOut 2s ease-in-out forwards;
+    `;
+
+    // Add CSS animation
+    if (!document.getElementById('flip-animation-style')) {
+      const style = document.createElement('style');
+      style.id = 'flip-animation-style';
+      style.textContent = `
+        @keyframes fadeInOut {
+          0%, 100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+          20%, 80% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(feedback);
+    setTimeout(() => feedback.remove(), 2000);
+  }
+
   toggleAudio() {
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
@@ -619,13 +737,16 @@ class MobileVideoCall {
 
   // Chat functionality
   openChat() {
-    this.mobileChatOverlay.classList.add('active');
-    this.mobileChatInput.focus();
-    this.chatBubble.classList.add('hidden');
+    this.mobileChatOverlay.classList.add('visible');
+    setTimeout(() => {
+      this.mobileChatInput.focus();
+    }, 300);
+    this.chatBubble.style.display = 'none';
   }
 
   closeChat() {
-    this.mobileChatOverlay.classList.remove('active');
+    this.mobileChatOverlay.classList.remove('visible');
+    this.chatBubble.style.display = 'block';
   }
 
   sendMessage() {

@@ -31,234 +31,16 @@
         </div>
     </div>
 
-    <!-- Express Poll Modal -->
-    <div id="pollModal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Create Express Poll</h3>
-                <button class="close-btn" id="closePollModal">×</button>
-            </div>
-            <form id="pollForm">
-                <div class="form-group">
-                    <label for="pollTitle">Question</label>
-                    <input type="text" id="pollTitle" placeholder="What's your question?" required>
-                </div>
-                <div class="form-group">
-                    <label>Options</label>
-                    <div class="poll-options" id="pollOptions">
-                        <input type="text" class="poll-option" placeholder="Option 1" required>
-                        <input type="text" class="poll-option" placeholder="Option 2" required>
-                    </div>
-                    <button type="button" class="add-option-btn" id="addOption">+ Add Option</button>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="pollDuration">Duration (seconds)</label>
-                        <select id="pollDuration">
-                            <option value="30">30s</option>
-                            <option value="60" selected>1 min</option>
-                            <option value="120">2 min</option>
-                            <option value="300">5 min</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="pollAnonymous">
-                            Anonymous voting
-                        </label>
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn-secondary" id="cancelPoll">Cancel</button>
-                    <button type="submit" class="btn-primary">Start Poll</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Active Poll Display -->
-    <div id="activePoll" class="poll-overlay hidden">
-        <div class="poll-card">
-            <div class="poll-header">
-                <h4 id="activePollTitle">Poll Question</h4>
-                <div class="poll-timer">
-                    <span id="pollTimeLeft">60s</span>
-                </div>
-            </div>
-            <div class="poll-options-list" id="activePollOptions">
-                <!-- Dynamic options -->
-            </div>
-            <div class="poll-footer">
-                <span id="pollVoteCount">0 votes</span>
-                <span id="pollCreator">by User</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Emotion Feedback Panel -->
-    <div id="emotionPanel" class="emotion-panel hidden">
-        <div class="emotion-header">
-            <h4>How are you feeling?</h4>
-            <button class="close-btn" id="closeEmotionPanel">×</button>
-        </div>
-        <div class="emotion-grid">
-            <button class="emotion-btn" data-emotion="happy">😊 Happy</button>
-            <button class="emotion-btn" data-emotion="excited">🤩 Excited</button>
-            <button class="emotion-btn" data-emotion="focused">🧠 Focused</button>
-            <button class="emotion-btn" data-emotion="confused">😕 Confused</button>
-            <button class="emotion-btn" data-emotion="frustrated">😤 Frustrated</button>
-            <button class="emotion-btn" data-emotion="bored">😴 Bored</button>
-            <button class="emotion-btn" data-emotion="anxious">😰 Anxious</button>
-            <button class="emotion-btn" data-emotion="neutral">😐 Neutral</button>
-        </div>
-        <div class="intensity-slider">
-            <label>Intensity</label>
-            <input type="range" id="emotionIntensity" min="1" max="5" value="3">
-            <div class="intensity-labels">
-                <span>Low</span>
-                <span>High</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Emotional Climate Display -->
-    <div id="emotionalClimate" class="climate-display hidden">
-        <div class="climate-header">
-            <span class="climate-icon">🌡️</span>
-            <span class="climate-text">Emotional Climate</span>
-        </div>
-        <div class="climate-content" id="climateContent">
-            <div class="climate-overall" id="climateOverall">Neutral</div>
-            <div class="climate-distribution" id="climateDistribution">
-                <!-- Dynamic emotion distribution -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Sociometry Test Modal -->
-    <div id="sociometryModal" class="modal hidden">
-        <div class="modal-content large">
-            <div class="modal-header">
-                <h3>Start Sociometric Test</h3>
-                <button class="close-btn" id="closeSociometryModal">×</button>
-            </div>
-            <div class="test-templates">
-                <div class="template-card active" data-template="pulse">
-                    <div class="template-icon">💓</div>
-                    <h4>Pulse Check</h4>
-                    <p>Quick team energy assessment</p>
-                    <span class="template-duration">3 min</span>
-                </div>
-                <div class="template-card" data-template="focus">
-                    <div class="template-icon">🎯</div>
-                    <h4>Focus Scan</h4>
-                    <p>Team attention and engagement levels</p>
-                    <span class="template-duration">5 min</span>
-                </div>
-                <div class="template-card" data-template="resonance">
-                    <div class="template-icon">🤝</div>
-                    <h4>Team Resonance</h4>
-                    <p>Collaboration and harmony metrics</p>
-                    <span class="template-duration">5 min</span>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-secondary" id="cancelSociometry">Cancel</button>
-                <button type="button" class="btn-primary" id="startSociometry">Start Test</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Active Sociometry Test -->
-    <div id="activeSociometry" class="sociometry-overlay hidden">
-        <div class="sociometry-card">
-            <div class="sociometry-header">
-                <h4 id="sociometryTitle">Pulse Check</h4>
-                <div class="sociometry-timer">
-                    <div class="timer-circle">
-                        <span id="sociometryTimeLeft">180s</span>
-                    </div>
-                </div>
-            </div>
-            <div class="sociometry-progress">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="sociometryProgress"></div>
-                </div>
-                <span id="sociometryResponseCount">0/5 responses</span>
-            </div>
-            <div class="sociometry-questions" id="sociometryQuestions">
-                <!-- Dynamic questions -->
-            </div>
-            <div class="sociometry-actions">
-                <button class="btn-primary" id="submitSociometry" disabled>Submit Response</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Desktop Chat Overlay (Enhanced) -->
-    <div class="desktop-chat-overlay" id="desktopChatOverlay">
-        <div class="desktop-chat-header">
-            <div class="chat-tabs">
-                <button class="chat-tab active" id="chatTab">💬 Chat</button>
-                <button class="chat-tab" id="assistantTab">🤖 AI Assistant</button>
-            </div>
-            <div class="chat-controls">
-                <button id="emotionBtn" class="chat-control-btn" title="Share emotion">😊</button>
-                <button id="pollBtn" class="chat-control-btn" title="Create poll">📊</button>
-                <button id="sociometryBtn" class="chat-control-btn" title="Start test">🧠</button>
-                <button id="closeChatBtn">×</button>
-            </div>
-        </div>
-
-        <div class="chat-content">
-            <!-- Regular Chat Panel -->
-            <div class="chat-panel active" id="chatPanel">
-                <div class="desktop-chat-messages" id="desktopChatMessages"></div>
-                <div class="desktop-chat-input-group">
-                    <textarea class="desktop-chat-input" id="desktopChatInput" placeholder="Type a message..." rows="1"></textarea>
-                    <button class="desktop-chat-send" id="desktopChatSend">→</button>
-                </div>
-            </div>
-
-            <!-- AI Assistant Panel -->
-            <div class="chat-panel" id="assistantPanel">
-                <div class="assistant-header">
-                    <div class="assistant-status">
-                        <span class="status-dot"></span>
-                        <span>Valera AI - Ready</span>
-                    </div>
-                    <label class="web-search-toggle">
-                        <input type="checkbox" id="webSearchToggle">
-                        <span>🔍 Web Search</span>
-                    </label>
-                </div>
-                <div class="assistant-messages" id="assistantMessages">
-                    <div class="welcome-message">
-                        <div class="assistant-avatar">🤖</div>
-                        <div class="message-content">
-                            <p>Hi! I'm Valera, your AI assistant. I can help with meeting analysis, team insights, and answer questions with web search. How can I assist you today?</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="assistant-input-group">
-                    <textarea class="assistant-input" id="assistantInput" placeholder="Ask Valera anything..." rows="1"></textarea>
-                    <button class="assistant-send" id="assistantSend">Ask</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Main Video Call Container -->
     <div class="video-call-container">
-        <!-- Enhanced Sidebar -->
+        <!-- Sidebar -->
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="avatar" id="userAvatar">Y</div>
+                <div class="avatar" id="userAvatar">U</div>
                 <div class="user-info">
-                    <h2 id="currentUserName">You</h2>
-                    <p id="connectionStatus">Online</p>
+                    <h2 id="currentUserName">User</h2>
+                    <p id="connectionStatus">Connecting...</p>
                 </div>
-                <button class="sidebar-toggle" id="sidebarToggle">‹</button>
+                <div class="sidebar-toggle" id="sidebarToggle">‹</div>
             </div>
 
             <div class="search-container">
@@ -267,202 +49,170 @@
                 </div>
             </div>
 
-            <div class="participants-header">
-                <span id="participantsCount">Participants (1)</span>
-                <button class="view-toggle" id="viewToggle" title="Switch to grid view">⊞</button>
-            </div>
-
-            <div class="participant-list" id="participantList">
-                <div class="participant-item self" data-peer="self">
-                    <div class="participant-avatar">Y
-                        <div class="online-indicator"></div>
-                        <div class="emotion-indicator hidden" id="selfEmotion">😊</div>
-                    </div>
-                    <div class="participant-info">
-                        <div class="participant-name">You</div>
-                        <div class="participant-status">Host</div>
-                    </div>
-                    <div class="participant-controls">
-                        <button class="control-btn" id="toggleSelfVideo" title="Toggle camera">📹</button>
-                        <button class="control-btn" id="toggleSelfAudio" title="Toggle microphone">🎤</button>
-                    </div>
+            <div class="participants-section">
+                <div class="participants-header">
+                    <h3>Participants (<span id="participantsCount">0</span>)</h3>
+                    <button class="view-toggle" id="viewToggle">🔄</button>
+                </div>
+                <div class="participant-list" id="participantList">
+                    <!-- Dynamic participant list -->
                 </div>
             </div>
 
             <div class="sidebar-footer">
-                <button class="footer-btn" id="settingsBtn" title="Settings">⚙️</button>
                 <button class="footer-btn" id="shareBtn" title="Share link">🔗</button>
-                <button class="footer-btn end-call" id="endCallBtn" title="End call">📞</button>
             </div>
         </div>
 
         <!-- Main video area -->
         <div class="main-video" id="mainVideo">
-            <!-- Active speaker view -->
             <div class="active-speaker-view" id="activeSpeakerView">
-                <video id="remoteVideo" autoplay playsinline></video>
-                <div class="video-placeholder remote-placeholder" id="remotePlaceholder">
-                    <div class="placeholder-avatar">👤</div>
-                    <div class="speaker-info">
-                        <div class="speaker-name" id="speakerName">Waiting for participants...</div>
-                        <div class="speaker-status">No active speaker</div>
+                <video id="remoteVideo" autoplay muted playsinline></video>
+                <div class="remote-placeholder" id="remotePlaceholder">
+                    <div class="placeholder-content">
+                        <div class="placeholder-icon">👤</div>
+                        <div class="placeholder-name">Waiting for others...</div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Enhanced Grid view -->
-            <div class="grid-view" id="gridView">
-                <div class="grid-tile" data-peer="self">
-                    <video autoplay playsinline muted></video>
-                    <div class="grid-avatar">Y</div>
-                    <div class="grid-name">You</div>
-                    <div class="grid-online"></div>
-                    <div class="grid-emotion hidden">😊</div>
-                    <div class="grid-controls">
-                        <button class="grid-control-btn">🎤</button>
-                        <button class="grid-control-btn">📹</button>
-                    </div>
+                <div class="speaker-info">
+                    <div class="speaker-name" id="speakerName">You</div>
                 </div>
             </div>
 
-            <!-- Small video window (self video) -->
-            <div class="small-video" id="smallVideo">
-                <video id="localVideo" autoplay playsinline muted></video>
-                <div class="video-placeholder local-placeholder" id="localPlaceholder">
-                    <div class="placeholder-avatar">👤</div>
-                </div>
-                <div class="small-video-header">
-                    <span class="video-label">You</span>
-                    <button class="expand-icon" id="expandIcon" title="Expand">↗</button>
+            <!-- Grid view (hidden by default) -->
+            <div class="grid-view hidden" id="gridView">
+                <div class="grid-container" id="gridContainer">
+                    <!-- Dynamic grid items -->
                 </div>
             </div>
         </div>
 
-        <!-- Enhanced Call timer -->
-        <div class="call-timer" id="callTimer">
-            <span class="timer-dot"></span>
-            <span class="timer-value" id="timerValue">00:00</span>
-            <span class="participant-count" id="timerParticipantCount">1</span>
+        <!-- Local video (small) -->
+        <div class="small-video" id="smallVideo">
+            <video id="localVideo" autoplay muted playsinline></video>
+            <div class="local-placeholder" id="localPlaceholder">
+                <div class="placeholder-content">
+                    <div class="placeholder-icon">📷</div>
+                    <div class="placeholder-text">Camera off</div>
+                </div>
+            </div>
+            <button class="expand-icon" id="expandIcon">↗</button>
         </div>
 
-        <!-- User name display -->
-        <div class="user-name-display" id="userNameDisplay">
-            <span id="displayedUserName">Your Name</span>
-        </div>
-
-        <!-- Enhanced Chat bubble -->
-        <div class="chat-bubble hidden" id="chatBubble">
-            <div class="chat-avatar">💬</div>
-            <div class="chat-text" id="lastChatMessage">Tap to open chat</div>
-            <span class="chat-expand">▼</span>
-        </div>
-
-        <!-- Enhanced Bottom controls -->
-        <div class="bottom-controls" id="bottomControls">
-            <div class="controls-left">
+        <!-- Control panel -->
+        <div class="control-panel">
+            <div class="controls">
                 <button class="bottom-btn" id="videoToggleBtn" title="Toggle camera">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M23 7l-7 5 7 5V7z" stroke="currentColor" stroke-width="2"/>
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" stroke="currentColor" stroke-width="2"/>
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/>
                     </svg>
                 </button>
                 <button class="bottom-btn" id="audioToggleBtn" title="Toggle microphone">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke="currentColor" stroke-width="2"/>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2"/>
-                        <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2"/>
-                        <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2"/>
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 14a3 3 0 003-3V7a3 3 0 00-6 0v4a3 3 0 003 3zM10.8 4.9A1.5 1.5 0 0112 5.5a1.5 1.5 0 011.2-.6A1.5 1.5 0 0115 6.5v4.1a1.5 1.5 0 01-3 0V6.5a1.5 1.5 0 00-1.2-.6zM19 11a1 1 0 00-2 0 5 5 0 01-10 0 1 1 0 00-2 0 7 7 0 0014 0z"/>
                     </svg>
                 </button>
                 <button class="bottom-btn" id="screenShareBtn" title="Share screen">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" stroke="currentColor" stroke-width="2"/>
-                        <line x1="8" y1="21" x2="16" y2="21" stroke="currentColor" stroke-width="2"/>
-                        <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="2"/>
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M13 17h2v2h-2v-2zm-4 0h2v2H9v-2zM5 17h2v2H5v-2zm12-8V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/>
+                    </svg>
+                </button>
+                <button class="bottom-btn" id="chatButton" title="Chat">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                </button>
+                <button class="end-call-btn bottom-btn" id="leaveBtn" title="Leave call">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.69.28-.26 0-.51-.1-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.7l-2.48 2.48c-.18.18-.43.29-.69.29-.26 0-.51-.1-.69-.28-.79-.73-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
                     </svg>
                 </button>
             </div>
 
-            <div class="controls-center">
-                <button class="bottom-btn end-call-btn" id="leaveBtn" title="End call">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                        <path d="M5 12h14m-7-7l7 7-7 7" stroke="currentColor" stroke-width="2" transform="rotate(135 12 12)"/>
-                    </svg>
-                </button>
+            <!-- Call timer -->
+            <div class="call-timer" id="callTimer">
+                <div class="timer-icon">🕐</div>
+                <div class="timer-value" id="timerValue">00:00</div>
             </div>
 
-            <div class="controls-right">
-                <button class="bottom-btn" id="emotionToggleBtn" title="Share emotion">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-                        <path d="8 14s1.5 2 4 2 4-2 4-2" stroke="currentColor" stroke-width="2"/>
-                        <line x1="9" y1="9" x2="9.01" y2="9" stroke="currentColor" stroke-width="2"/>
-                        <line x1="15" y1="9" x2="15.01" y2="9" stroke="currentColor" stroke-width="2"/>
-                    </svg>
-                </button>
-                <button class="bottom-btn" id="chatButton" title="Open chat">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2"/>
-                    </svg>
-                </button>
-                <button class="bottom-btn" id="fullscreenBtn" title="Toggle fullscreen">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="2"/>
-                    </svg>
-                </button>
-                <button class="bottom-btn" id="moreOptionsBtn" title="More options">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="1" stroke="currentColor" stroke-width="2"/>
-                        <circle cx="12" cy="5" r="1" stroke="currentColor" stroke-width="2"/>
-                        <circle cx="12" cy="19" r="1" stroke="currentColor" stroke-width="2"/>
-                    </svg>
-                </button>
+            <!-- User name display -->
+            <div class="user-name-display hidden" id="userNameDisplay">
+                <div class="displayed-user-name" id="displayedUserName">User</div>
             </div>
         </div>
 
-        <!-- Enhanced Connection status indicator -->
-        <div class="connection-indicator" id="connectionIndicator">
+        <!-- Connection indicator (moved to bottom right) -->
+        <div class="connection-indicator bottom-right" id="connectionIndicator">
             <div class="connection-dot"></div>
-            <span id="connectionText">Connected</span>
-            <div class="connection-details hidden" id="connectionDetails">
-                <div class="detail-item">
-                    <span class="detail-label">Quality:</span>
-                    <span class="detail-value" id="connectionQuality">Good</span>
+            <div class="connection-text" id="connectionText">Good connection</div>
+        </div>
+
+        <!-- Chat overlay -->
+        <div class="desktop-chat-overlay" id="desktopChatOverlay">
+            <div class="desktop-chat-header">
+                <div class="chat-tabs">
+                    <button class="chat-tab active" id="chatTab">💬 Chat</button>
+                    <button class="chat-tab" id="assistantTab">🤖 AI Assistant</button>
                 </div>
-                <div class="detail-item">
-                    <span class="detail-label">Latency:</span>
-                    <span class="detail-value" id="connectionLatency">45ms</span>
+                <div class="chat-controls">
+                    <button id="closeChatBtn">×</button>
+                </div>
+            </div>
+
+            <div class="desktop-chat-messages" id="desktopChatMessages">
+                <!-- Messages will be added here -->
+            </div>
+
+            <div class="desktop-chat-input-group">
+                <textarea id="desktopChatInput" placeholder="Type a message..." rows="1"></textarea>
+                <button id="desktopChatSend" class="desktop-chat-send">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Assistant panel -->
+            <div class="assistant-panel" id="assistantPanel">
+                <div class="assistant-header">
+                    <h4>🤖 AI Assistant</h4>
+                    <button class="web-search-toggle" id="webSearchToggle" title="Web search">
+                        🌐
+                    </button>
+                </div>
+                <div class="assistant-messages" id="assistantMessages">
+                    <!-- AI messages will be added here -->
+                </div>
+                <div class="assistant-input-group">
+                    <textarea id="assistantInput" placeholder="Ask AI assistant..." rows="2"></textarea>
+                    <button id="assistantSend" class="assistant-send">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Notification banner -->
-        <div id="videoNotice" class="notification-banner hidden"></div>
-
-        <!-- Poll Results Display -->
-        <div id="pollResults" class="poll-results hidden">
-            <div class="results-header">
-                <h4>Poll Results</h4>
-                <button class="close-btn" id="closePollResults">×</button>
-            </div>
-            <div class="results-content" id="pollResultsContent">
-                <!-- Dynamic results -->
-            </div>
+        <!-- Chat bubble (floating) -->
+        <div class="chat-bubble" id="chatBubble">
+            <div class="chat-icon">💬</div>
+            <div class="chat-text" id="lastChatMessage">Start a conversation</div>
+            <div class="chat-expand" id="expandChat">+</div>
         </div>
 
-        <!-- Sociometry Results Display -->
-        <div id="sociometryResults" class="sociometry-results hidden">
-            <div class="results-header">
-                <h4>Test Results</h4>
-                <button class="close-btn" id="closeSociometryResults">×</button>
-            </div>
-            <div class="results-content" id="sociometryResultsContent">
-                <!-- Dynamic results -->
-            </div>
+        <!-- Notification system -->
+        <div id="notifications" class="notifications-container">
+            <!-- Notifications will be added here -->
+        </div>
+
+        <!-- Video notice -->
+        <div id="videoNotice" class="video-notice hidden">
+            <p>No camera or microphone detected. You can still participate in the chat.</p>
+            <button onclick="this.parentElement.style.display='none'">Got it</button>
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="desktop.js" defer></script>
+    <script src="desktop.js"></script>
 </body>
 </html>

@@ -399,17 +399,28 @@ class DesktopVideoCall {
     } catch (error) {
       console.error('💥 Error accessing media devices:', error);
 
-      // Handle permission denials gracefully
+      // Always create fallback stream and continue
+      this.createFallbackStream();
+
+      // Show appropriate notification
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        this.showNotification('Camera/microphone access denied. You can still join with chat only.', 'warning');
-        this.createFallbackStream();
+        this.showNotification('Camera/microphone access denied. Click to try again.', 'warning');
       } else if (error.name === 'NotFoundError') {
-        this.showNotification('No camera/microphone found. Joining with chat only.', 'warning');
-        this.createFallbackStream();
+        this.showNotification('No camera/microphone found. Audio/Video disabled.', 'warning');
+      } else if (error.name === 'NotReadableError') {
+        this.showNotification('Camera/microphone in use by another app.', 'warning');
       } else {
-        this.showNotification('Media access failed. Joining with chat only.', 'error');
-        this.createFallbackStream();
+        this.showNotification('Media access failed. Click controls to try again.', 'error');
       }
+
+      // Add self to participant list anyway
+      this.addParticipant({
+        id: 'self',
+        displayName: this.displayName,
+        isLocal: true
+      });
+
+      console.log('🚀 Media initialization complete (chat-only mode)');
     }
   }
 
@@ -473,7 +484,10 @@ class DesktopVideoCall {
       reconnection: true,
       reconnectionAttempts: this.maxReconnectAttempts,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 30000
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.5,
+      forceNew: false,
+      autoConnect: true
     });
 
     this.socket.on('connect', () => {
@@ -501,6 +515,27 @@ class DesktopVideoCall {
       console.log('Reconnected to server');
       this.updateConnectionStatus('connected');
       this.rejoinRoom();
+    });
+
+    this.socket.on('reconnect_error', () => {
+      console.log('Reconnection failed');
+      this.updateConnectionStatus('error');
+    });
+
+    this.socket.on('reconnect_failed', () => {
+      console.log('Reconnection attempts exhausted');
+      this.updateConnectionStatus('error');
+      this.showNotification('Connection lost. Please refresh the page.', 'error');
+    });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+      this.updateConnectionStatus('error');
+    });
+
+    this.socket.on('error', (error) => {
+      console.error('Socket error:', error);
+      this.updateConnectionStatus('error');
     });
 
     this.socket.on('user-joined', this.handleUserJoined.bind(this));
@@ -786,32 +821,131 @@ class DesktopVideoCall {
   }
 
   // Control Functions
-  toggleVideo() {
+  async toggleVideo() {
     if (this.localStream) {
       const videoTrack = this.localStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         this.isVideoEnabled = videoTrack.enabled;
-        this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
-
-        if (!this.isVideoEnabled) {
-          this.localPlaceholder.style.display = 'flex';
-        } else {
-          this.localPlaceholder.style.display = 'none';
-        }
+        this.updateVideoUI();
+      } else if (!this.isVideoEnabled) {
+        // Try to get video access again
+        await this.requestVideoAccess();
       }
+    } else if (!this.isVideoEnabled) {
+      // Try to initialize media again
+      await this.requestVideoAccess();
     }
   }
 
-  toggleAudio() {
+  async requestVideoAccess() {
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const videoTrack = videoStream.getVideoTracks()[0];
+
+      if (this.localStream) {
+        this.localStream.addTrack(videoTrack);
+      } else {
+        this.localStream = videoStream;
+      }
+
+      this.localVideo.srcObject = this.localStream;
+      this.isVideoEnabled = true;
+      this.updateVideoUI();
+
+      // Update peer connections
+      this.updatePeerConnectionTracks();
+    } catch (error) {
+      console.error('Failed to get video access:', error);
+      this.showNotification('Camera access denied or unavailable', 'error');
+    }
+  }
+
+  updateVideoUI() {
+    if (this.videoToggleBtn) {
+      this.videoToggleBtn.classList.toggle('disabled', !this.isVideoEnabled);
+      this.videoToggleBtn.classList.toggle('muted', !this.isVideoEnabled);
+      this.videoToggleBtn.title = this.isVideoEnabled ? 'Turn off camera' : 'Turn on camera';
+    }
+
+    if (this.isVideoEnabled) {
+      this.localPlaceholder.style.display = 'none';
+      if (this.localVideo) this.localVideo.style.display = 'block';
+    } else {
+      this.localPlaceholder.style.display = 'flex';
+      if (this.localVideo) this.localVideo.style.display = 'none';
+    }
+  }
+
+  async toggleAudio() {
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         this.isAudioEnabled = audioTrack.enabled;
-        this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
+        this.updateAudioUI();
+      } else if (!this.isAudioEnabled) {
+        // Try to get audio access again
+        await this.requestAudioAccess();
       }
+    } else if (!this.isAudioEnabled) {
+      // Try to initialize media again
+      await this.requestAudioAccess();
     }
+  }
+
+  async requestAudioAccess() {
+    try {
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioTrack = audioStream.getAudioTracks()[0];
+
+      if (this.localStream) {
+        this.localStream.addTrack(audioTrack);
+      } else {
+        this.localStream = audioStream;
+      }
+
+      this.isAudioEnabled = true;
+      this.updateAudioUI();
+
+      // Update peer connections
+      this.updatePeerConnectionTracks();
+    } catch (error) {
+      console.error('Failed to get audio access:', error);
+      this.showNotification('Microphone access denied or unavailable', 'error');
+    }
+  }
+
+  updateAudioUI() {
+    if (this.audioToggleBtn) {
+      this.audioToggleBtn.classList.toggle('disabled', !this.isAudioEnabled);
+      this.audioToggleBtn.classList.toggle('muted', !this.isAudioEnabled);
+      this.audioToggleBtn.title = this.isAudioEnabled ? 'Mute microphone' : 'Unmute microphone';
+    }
+  }
+
+  updatePeerConnectionTracks() {
+    // Update all peer connections with new tracks
+    this.peerConnections.forEach(async (peerConnection, participantId) => {
+      if (peerConnection.connectionState !== 'closed') {
+        try {
+          const senders = peerConnection.getSenders();
+          const tracks = this.localStream.getTracks();
+
+          // Replace or add tracks
+          for (const track of tracks) {
+            const sender = senders.find(s => s.track && s.track.kind === track.kind);
+            if (sender) {
+              await sender.replaceTrack(track);
+            } else {
+              peerConnection.addTrack(track, this.localStream);
+            }
+          }
+        } catch (error) {
+          console.error('Error updating peer connection tracks:', error);
+        }
+      }
+    });
   }
 
   async toggleScreenShare() {
@@ -928,8 +1062,14 @@ class DesktopVideoCall {
   }
 
   closeChat() {
-    this.desktopChatOverlay.classList.remove('active');
-    this.assistantPanel.classList.remove('active');
+    console.log('Closing chat...');
+    if (this.desktopChatOverlay) {
+      this.desktopChatOverlay.classList.remove('active');
+      console.log('Chat overlay closed');
+    }
+    if (this.assistantPanel) {
+      this.assistantPanel.classList.remove('active');
+    }
   }
 
   toggleAssistantMode() {
