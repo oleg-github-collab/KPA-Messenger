@@ -552,6 +552,16 @@ class MobileVideoCall {
 
     this.updateMediaControlsUI();
     this.showNotification(this.isVideoEnabled ? 'Camera turned on' : 'Camera turned off', 'info');
+
+    // Notify other participants about media state change
+    if (this.socket) {
+      this.socket.emit('media-state-changed', {
+        roomToken: this.roomToken,
+        participantId: this.displayName,
+        isVideoEnabled: this.isVideoEnabled,
+        isAudioEnabled: this.isAudioEnabled
+      });
+    }
   }
 
   async requestVideoAccess() {
@@ -612,6 +622,16 @@ class MobileVideoCall {
 
     this.updateMediaControlsUI();
     this.showNotification(this.isAudioEnabled ? 'Microphone unmuted' : 'Microphone muted', 'info');
+
+    // Notify other participants about media state change
+    if (this.socket) {
+      this.socket.emit('media-state-changed', {
+        roomToken: this.roomToken,
+        participantId: this.displayName,
+        isVideoEnabled: this.isVideoEnabled,
+        isAudioEnabled: this.isAudioEnabled
+      });
+    }
   }
 
   async requestAudioAccess() {
@@ -751,6 +771,7 @@ class MobileVideoCall {
             const senders = peerConnection.getSenders();
             const tracks = this.localStream.getTracks();
 
+            let trackAdded = false;
             for (const track of tracks) {
               const sender = senders.find(s => s.track && s.track.kind === track.kind);
               if (sender) {
@@ -759,6 +780,22 @@ class MobileVideoCall {
               } else {
                 console.log(`➕ Adding new ${track.kind} track for participant:`, participantId);
                 peerConnection.addTrack(track, this.localStream);
+                trackAdded = true;
+              }
+            }
+
+            // If we added a new track, create new offer to renegotiate
+            if (trackAdded) {
+              console.log(`🔄 Creating new offer for ${participantId} due to track addition`);
+              const offer = await peerConnection.createOffer();
+              await peerConnection.setLocalDescription(offer);
+
+              if (this.socket) {
+                this.socket.emit('offer', {
+                  roomToken: this.roomToken,
+                  offer: offer,
+                  targetId: participantId
+                });
               }
             }
           } catch (error) {
@@ -841,6 +878,31 @@ class MobileVideoCall {
     this.socket.on('answer', (data) => this.handleAnswer(data));
     this.socket.on('ice-candidate', (data) => this.handleIceCandidate(data));
     this.socket.on('chat-message', (data) => this.handleChatMessage(data));
+    this.socket.on('media-state-changed', (data) => this.handleMediaStateChanged(data));
+  }
+
+  handleMediaStateChanged(data) {
+    console.log('📱 Media state changed for participant:', data.participantId, data);
+
+    // Update participant info if we have it
+    const participant = Array.from(this.participants.values()).find(p => p.displayName === data.participantId);
+    if (participant) {
+      participant.isVideoEnabled = data.isVideoEnabled;
+      participant.isAudioEnabled = data.isAudioEnabled;
+      console.log('📱 Updated participant media state:', participant);
+    }
+
+    // Force refresh of connection if this is about video being enabled
+    if (data.isVideoEnabled && participant) {
+      console.log('📱 Video was enabled, refreshing connection...');
+      setTimeout(() => {
+        const peerConnection = this.peerConnections.get(participant.id);
+        if (peerConnection) {
+          console.log('📱 Restarting ICE for participant:', participant.id);
+          peerConnection.restartIce();
+        }
+      }, 1000);
+    }
   }
 
   // WebRTC Functions (simplified for mobile)
