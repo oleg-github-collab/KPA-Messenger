@@ -371,18 +371,20 @@ class MobileVideoCall {
     try {
       console.log('📱 Requesting mobile media access...', { video: videoEnabled, audio: audioEnabled });
 
-      // Fast mobile constraints for quick connection
+      // Optimized mobile constraints for quality and performance
       const constraints = {
         video: videoEnabled ? {
-          width: { ideal: 480 },
-          height: { ideal: 360 },
+          width: { ideal: 720, min: 360, max: 1280 },
+          height: { ideal: 480, min: 240, max: 720 },
           facingMode: this.facingMode,
-          frameRate: { ideal: 20 }
+          frameRate: { ideal: 25, min: 15 }
         } : false,
         audio: audioEnabled ? {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          sampleRate: { ideal: 48000 },
+          channelCount: { ideal: 1 }
         } : false
       };
 
@@ -851,13 +853,13 @@ class MobileVideoCall {
     console.log('🔌 Connecting mobile to server...');
 
     this.socket = io({
-      transports: ['websocket'],
-      timeout: 8000,
+      transports: ['websocket', 'polling'],
+      timeout: 12000,
       reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 2000,
-      forceNew: true
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 4000,
+      forceNew: false
     });
 
     this.socket.on('connect', () => {
@@ -914,12 +916,15 @@ class MobileVideoCall {
     const peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' }
       ],
-      iceCandidatePoolSize: 4,
+      iceCandidatePoolSize: 10,
       iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
+      rtcpMuxPolicy: 'require',
+      iceGatheringTimeoutMs: 5000
     });
 
     peerConnection.onicecandidate = (event) => {

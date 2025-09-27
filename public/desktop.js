@@ -399,17 +399,20 @@ class DesktopVideoCall {
     try {
       console.log('🎬 Requesting media access...');
 
-      // Fast and simple constraints for quick connection
+      // Balanced constraints for good quality and speed
       const constraints = {
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          frameRate: { ideal: 24 }
+          width: { ideal: 960, min: 480, max: 1280 },
+          height: { ideal: 540, min: 360, max: 720 },
+          frameRate: { ideal: 30, min: 20 },
+          facingMode: 'user'
         },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          sampleRate: { ideal: 48000 },
+          channelCount: { ideal: 1 }
         }
       };
 
@@ -971,13 +974,13 @@ class DesktopVideoCall {
     console.log('🔌 Connecting to server...');
 
     this.socket = io({
-      transports: ['websocket'],
-      timeout: 10000,
+      transports: ['websocket', 'polling'],
+      timeout: 15000,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 3000,
-      forceNew: true
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      forceNew: false
     });
 
     this.socket.on('connect', () => {
@@ -1038,12 +1041,15 @@ class DesktopVideoCall {
     const peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' }
       ],
-      iceCandidatePoolSize: 4,
+      iceCandidatePoolSize: 10,
       iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
+      rtcpMuxPolicy: 'require',
+      iceGatheringTimeoutMs: 5000
     });
 
     peerConnection.onicecandidate = (event) => {
@@ -1097,9 +1103,20 @@ class DesktopVideoCall {
     };
 
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, this.localStream);
+      console.log('🖥️ Adding local tracks to peer connection for:', participantId);
+      const tracks = this.localStream.getTracks();
+      console.log('🖥️ Available tracks:', tracks.map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+
+      tracks.forEach(track => {
+        try {
+          peerConnection.addTrack(track, this.localStream);
+          console.log(`🖥️ Added ${track.kind} track to peer connection`);
+        } catch (error) {
+          console.error(`🖥️ Failed to add ${track.kind} track:`, error);
+        }
       });
+    } else {
+      console.warn('🖥️ No local stream available when creating peer connection');
     }
 
     this.peerConnections.set(participantId, peerConnection);
