@@ -317,12 +317,12 @@ const RedisKeys = {
 // Redis helper functions
 const RedisHelper = {
   // Meeting management
-  async createMeeting(token, host) {
+  async createMeeting(token, host, maxParticipants = 20) {
     const meetingData = {
       token,
       host,
       status: 'active',
-      maxParticipants: 10,
+      maxParticipants: maxParticipants,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       settings: JSON.stringify({}),
@@ -686,7 +686,7 @@ app.post('/auth', (req, res) => {
 
 app.post('/api/meetings', async (req, res) => {
   try {
-    const { maxParticipants = 10, hostName } = req.body;
+    const { maxParticipants = 20, hostName } = req.body;
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -701,7 +701,7 @@ app.post('/api/meetings', async (req, res) => {
 
     // Store meeting data (Redis or in-memory fallback)
     try {
-      await RedisHelper.createMeeting(roomToken, hostName || 'host');
+      await RedisHelper.createMeeting(roomToken, hostName || 'host', maxParticipants);
       await RedisHelper.updateSession(roomToken, {
         createdBy: hostName || 'host',
         createdAt: new Date().toISOString(),
@@ -756,6 +756,51 @@ app.get('/api/meetings/:token', async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting meeting info:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
+// Endpoint to end a meeting explicitly
+app.post('/api/meetings/:token/end', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ ok: false, message: 'No token provided' });
+    }
+
+    // Check if meeting exists
+    const meeting = await RedisHelper.getMeeting(token);
+    if (!meeting) {
+      return res.status(404).json({ ok: false, message: 'Meeting not found' });
+    }
+
+    // Clean up the meeting
+    await RedisHelper.deleteMeeting(token);
+
+    // Remove from in-memory rooms if exists
+    if (rooms.has(token)) {
+      const room = rooms.get(token);
+      // Notify all participants that meeting is ending
+      io.to(token).emit('meeting-ended', {
+        reason: 'Meeting ended by host',
+        endedAt: new Date().toISOString()
+      });
+
+      rooms.delete(token);
+    }
+
+    console.log(`Meeting ${token} ended explicitly`);
+
+    res.json({
+      ok: true,
+      message: 'Meeting ended successfully',
+      endedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error ending meeting:', error);
     res.status(500).json({ ok: false, message: 'Server error' });
   }
 });
@@ -964,7 +1009,7 @@ io.on('connection', (socket) => {
 
       // Check participant limit
       const participants = await RedisHelper.getParticipants(roomToken);
-      if (participants.length >= (meeting.maxParticipants || 10)) {
+      if (participants.length >= (meeting.maxParticipants || 20)) {
         socket.emit('room-full');
         return;
       }

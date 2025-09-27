@@ -1178,6 +1178,32 @@ class MobileVideoCall {
 
   leaveCall() {
     if (confirm('Are you sure you want to leave the call?')) {
+      this.endSession();
+    }
+  }
+
+  async endSession() {
+    try {
+      // Call server to end meeting if this user is host
+      const token = sessionStorage.getItem('authToken');
+      if (token && this.roomToken) {
+        try {
+          await fetch(`/api/meetings/${this.roomToken}/end`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+        } catch (error) {
+          console.error('Error ending meeting on server:', error);
+        }
+      }
+
+      this.cleanupCall();
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Error in endSession:', error);
       this.cleanupCall();
       window.location.href = '/';
     }
