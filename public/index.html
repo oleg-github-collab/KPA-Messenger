@@ -320,7 +320,11 @@
         const data = await response.json();
 
         if (response.ok && data.ok) {
-          meetingLinkInput.value = data.meetingUrl;
+          // Create the correct meeting URL based on current domain
+          const baseUrl = window.location.origin;
+          const meetingUrl = `${baseUrl}/universal.html?room=${encodeURIComponent(data.token)}`;
+
+          meetingLinkInput.value = meetingUrl;
           openMeetingBtn.dataset.roomToken = data.token;
           meetingBlock.classList.remove('hidden');
           meetingMessage.textContent = `Ready for ${t('capacityValue', data.maxParticipants || 20)}`;
@@ -368,10 +372,8 @@
       sessionStorage.setItem('enableVideo', enableVideo.toString());
       sessionStorage.setItem('enableAudio', enableAudio.toString());
 
-      // Navigate to meeting - detect device type
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
-      const targetPage = isMobile ? '/mobile.html' : '/desktop.html';
-      window.location.href = `${targetPage}?room=${encodeURIComponent(token)}`;
+      // Navigate to meeting using universal page
+      window.location.href = `/universal.html?room=${encodeURIComponent(token)}`;
     }
 
     // Event Listeners

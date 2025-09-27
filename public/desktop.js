@@ -1055,11 +1055,25 @@ class DesktopVideoCall {
     };
 
     peerConnection.ontrack = (event) => {
-      console.log('Received remote stream from:', participantId);
-      const participant = this.participants.get(participantId);
-      if (participant) {
-        participant.stream = event.streams[0];
-        this.updateRemoteVideo(event.streams[0]);
+      console.log('🖥️ Received remote stream from:', participantId, 'Event:', event);
+      console.log('🖥️ Track kind:', event.track.kind, 'enabled:', event.track.enabled, 'readyState:', event.track.readyState);
+      console.log('🖥️ Streams in event:', event.streams.length);
+
+      if (event.streams && event.streams.length > 0) {
+        const stream = event.streams[0];
+        console.log('🖥️ Stream tracks:', stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+
+        const participant = this.participants.get(participantId);
+        if (participant) {
+          participant.stream = stream;
+          this.updateRemoteVideo(stream);
+          console.log('🖥️ Updated remote video for participant:', participant.displayName);
+        } else {
+          console.warn('🖥️ Received stream but participant not found:', participantId);
+          this.updateRemoteVideo(stream);
+        }
+      } else {
+        console.error('🖥️ No streams in ontrack event');
       }
     };
 
@@ -1117,16 +1131,35 @@ class DesktopVideoCall {
   }
 
   updateRemoteVideo(stream) {
-    if (this.remoteVideo) {
+    console.log('🖥️ updateRemoteVideo called with stream:', stream?.id);
+    console.log('🖥️ Stream tracks:', stream?.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+    console.log('🖥️ Remote video element exists:', !!this.remoteVideo);
+
+    if (this.remoteVideo && stream) {
       this.remoteVideo.srcObject = stream;
+
+      // Force video to start playing
+      this.remoteVideo.play().catch(e => {
+        console.warn('🖥️ Could not auto-play remote video:', e);
+      });
+
       if (this.remotePlaceholder) {
         this.remotePlaceholder.style.display = 'none';
       }
+
+      console.log('🖥️ Remote video updated successfully');
+    } else {
+      console.warn('🖥️ Cannot update remote video - missing elements or stream');
     }
   }
 
   async handleUserJoined(data) {
-    console.log('👋 User joined:', data.displayName);
+    console.log('👋 Desktop - User joined:', data.displayName);
+    console.log('🖥️ Current local stream state:', this.localStream ? 'Available' : 'Not available');
+    if (this.localStream) {
+      console.log('🖥️ Local stream tracks when user joins:', this.localStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+    }
+
     this.addParticipant({
       id: data.socketId,
       displayName: data.displayName,
@@ -1134,9 +1167,13 @@ class DesktopVideoCall {
     });
 
     const peerConnection = await this.createPeerConnection(data.socketId);
+    console.log('🖥️ Creating offer for:', data.displayName);
     const offer = await peerConnection.createOffer();
+    console.log('🖥️ Offer SDP contains video:', offer.sdp.includes('m=video'));
+    console.log('🖥️ Offer SDP contains audio:', offer.sdp.includes('m=audio'));
     await peerConnection.setLocalDescription(offer);
 
+    console.log('🖥️ Sending offer to:', data.displayName);
     this.socket.emit('offer', {
       roomToken: this.roomToken,
       offer: offer,
@@ -1145,6 +1182,10 @@ class DesktopVideoCall {
   }
 
   async handleOffer(data) {
+    console.log('🖥️ Received offer from:', data.from);
+    console.log('🖥️ Received offer SDP contains video:', data.offer.sdp.includes('m=video'));
+    console.log('🖥️ Received offer SDP contains audio:', data.offer.sdp.includes('m=audio'));
+
     const peerConnection = await this.createPeerConnection(data.from);
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
     const answer = await peerConnection.createAnswer();

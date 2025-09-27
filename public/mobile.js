@@ -972,9 +972,14 @@ class MobileVideoCall {
     };
 
     if (this.localStream) {
+      console.log('📱 Adding local stream tracks to peer connection for:', participantId);
+      console.log('📱 Local stream tracks:', this.localStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
       this.localStream.getTracks().forEach(track => {
+        console.log(`📱 Adding ${track.kind} track (enabled: ${track.enabled}, ready: ${track.readyState})`);
         peerConnection.addTrack(track, this.localStream);
       });
+    } else {
+      console.warn('📱 No local stream available when creating peer connection for:', participantId);
     }
 
     this.peerConnections.set(participantId, peerConnection);
@@ -1030,6 +1035,11 @@ class MobileVideoCall {
 
   async handleUserJoined(data) {
     console.log('👋 Mobile - User joined:', data.displayName);
+    console.log('📱 Current local stream state:', this.localStream ? 'Available' : 'Not available');
+    if (this.localStream) {
+      console.log('📱 Local stream tracks when user joins:', this.localStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+    }
+
     this.addParticipant({
       id: data.socketId,
       displayName: data.displayName,
@@ -1037,9 +1047,13 @@ class MobileVideoCall {
     });
 
     const peerConnection = await this.createPeerConnection(data.socketId);
+    console.log('📱 Creating offer for:', data.displayName);
     const offer = await peerConnection.createOffer();
+    console.log('📱 Offer SDP contains video:', offer.sdp.includes('m=video'));
+    console.log('📱 Offer SDP contains audio:', offer.sdp.includes('m=audio'));
     await peerConnection.setLocalDescription(offer);
 
+    console.log('📱 Sending offer to:', data.displayName);
     this.socket.emit('offer', {
       roomToken: this.roomToken,
       offer: offer,
@@ -1048,6 +1062,10 @@ class MobileVideoCall {
   }
 
   async handleOffer(data) {
+    console.log('📱 Received offer from:', data.from);
+    console.log('📱 Received offer SDP contains video:', data.offer.sdp.includes('m=video'));
+    console.log('📱 Received offer SDP contains audio:', data.offer.sdp.includes('m=audio'));
+
     const peerConnection = await this.createPeerConnection(data.from);
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
     const answer = await peerConnection.createAnswer();
