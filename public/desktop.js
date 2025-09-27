@@ -60,10 +60,12 @@ class DesktopVideoCall {
     this.screenShareBtn = document.getElementById('screenShareBtn');
     this.leaveBtn = document.getElementById('leaveBtn');
     this.chatButton = document.getElementById('chatButton');
+    this.pipBtn = document.getElementById('pipBtn');
     this.fullscreenBtn = document.getElementById('fullscreenBtn');
 
     console.log('📹 Video toggle button:', this.videoToggleBtn);
     console.log('🎤 Audio toggle button:', this.audioToggleBtn);
+    console.log('🖼️ PiP button:', this.pipBtn);
     console.log('📺 Fullscreen button:', this.fullscreenBtn);
 
     // UI elements
@@ -145,6 +147,10 @@ class DesktopVideoCall {
 
     if (this.chatButton) {
       this.chatButton.addEventListener('click', () => this.openChat());
+    }
+
+    if (this.pipBtn) {
+      this.pipBtn.addEventListener('click', () => this.togglePictureInPicture());
     }
 
     // Name form
@@ -1265,14 +1271,20 @@ class DesktopVideoCall {
     if (!this.participantList) return;
 
     console.log('🔄 Updating desktop participants list UI');
+    console.log('👥 Current participants:', Array.from(this.participants.values()).map(p => ({id: p.id, name: p.displayName, isLocal: p.isLocal})));
 
     // Clear all non-self participants
     const existingParticipants = this.participantList.querySelectorAll('.participant-item:not([data-peer="self"])');
+    console.log('🗑️ Removing existing participants:', existingParticipants.length);
     existingParticipants.forEach(item => item.remove());
 
     // Add all participants except self
+    let addedCount = 0;
     this.participants.forEach((participant, id) => {
-      if (participant.isLocal) return; // Skip self
+      if (participant.isLocal) {
+        console.log('⏭️ Skipping self participant:', participant.displayName);
+        return; // Skip self
+      }
 
       const participantEl = document.createElement('div');
       participantEl.className = 'participant-item';
@@ -1294,6 +1306,7 @@ class DesktopVideoCall {
       `;
 
       this.participantList.appendChild(participantEl);
+      addedCount++;
 
       // Add event listener for private message button
       const privateMessageBtn = participantEl.querySelector('.private-message-btn');
@@ -1303,9 +1316,11 @@ class DesktopVideoCall {
           this.openPrivateMessage(id, participant.displayName);
         });
       }
+
+      console.log('➕ Added participant to UI:', participant.displayName);
     });
 
-    console.log(`✅ Desktop participants list updated: ${this.participants.size} total participants`);
+    console.log(`✅ Desktop participants list updated: ${addedCount} remote participants added, ${this.participants.size} total participants`);
   }
 
   openPrivateMessage(participantId, participantName) {
@@ -1899,6 +1914,18 @@ class DesktopVideoCall {
       }
     } catch (error) {
       console.warn('⚠️ Failed to exit Picture-in-Picture:', error.message);
+    }
+  }
+
+  async togglePictureInPicture() {
+    console.log('🖼️ Toggle Picture-in-Picture button clicked');
+
+    if (document.pictureInPictureElement) {
+      // Currently in PiP mode, exit it
+      await this.exitPictureInPicture();
+    } else {
+      // Not in PiP mode, enter it
+      await this.enterPictureInPicture();
     }
   }
 

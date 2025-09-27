@@ -55,6 +55,7 @@ class MobileVideoCall {
     this.audioToggleBtn = document.getElementById('audioToggleBtn');
     this.leaveBtn = document.getElementById('leaveBtn');
     this.chatButton = document.getElementById('chatButton');
+    this.pipBtn = document.getElementById('pipBtn');
     this.backButton = document.getElementById('backButton');
     this.expandIcon = document.getElementById('expandIcon');
 
@@ -121,6 +122,10 @@ class MobileVideoCall {
 
     if (this.chatButton) {
       this.chatButton.addEventListener('click', () => this.openChatOverlay());
+    }
+
+    if (this.pipBtn) {
+      this.pipBtn.addEventListener('click', () => this.togglePictureInPicture());
     }
 
     if (this.backButton) {
@@ -1135,7 +1140,19 @@ class MobileVideoCall {
 
       const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
       this.timerValue.textContent = timeString;
+
+      // Re-request wake lock if it was lost
+      if (!this.wakeLock) {
+        this.requestWakeLock();
+      }
     }, 1000);
+
+    // Handle visibility change to re-request wake lock
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.callStartTime) {
+        this.requestWakeLock();
+      }
+    });
   }
 
   showUserNameTemporarily() {
@@ -1486,6 +1503,18 @@ class MobileVideoCall {
       }
     } catch (error) {
       console.warn('⚠️ Failed to exit Picture-in-Picture:', error.message);
+    }
+  }
+
+  async togglePictureInPicture() {
+    console.log('📱 Toggle Picture-in-Picture button clicked');
+
+    if (document.pictureInPictureElement) {
+      // Currently in PiP mode, exit it
+      await this.exitPictureInPicture();
+    } else {
+      // Not in PiP mode, enter it
+      await this.enterPictureInPicture();
     }
   }
 
