@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import Stripe from 'stripe';
 
 dotenv.config();
 
@@ -30,6 +31,11 @@ const io = new Server(server, {
 // Initialize OpenAI with Railway environment variable
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Initialize Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_...', {
+  apiVersion: '2024-06-20',
 });
 
 // Initialize Redis client but don't connect immediately
@@ -727,6 +733,257 @@ app.post('/api/meetings', async (req, res) => {
   }
 });
 
+// Create meeting with Stripe invoice
+app.post('/api/meetings/with-invoice', async (req, res) => {
+  try {
+    const {
+      maxParticipants = 20,
+      hostName,
+      clientEmail,
+      clientName,
+      amount,
+      currency = 'usd',
+      description,
+      dueDate,
+      template
+    } = req.body;
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ ok: false, message: 'No token provided' });
+    }
+
+    // Validate required invoice fields
+    if (!clientEmail || !amount || !description) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Missing required fields: clientEmail, amount, description'
+      });
+    }
+
+    // Create or get customer
+    let customer;
+    try {
+      const customers = await stripe.customers.list({
+        email: clientEmail,
+        limit: 1
+      });
+
+      if (customers.data.length > 0) {
+        customer = customers.data[0];
+      } else {
+        customer = await stripe.customers.create({
+          email: clientEmail,
+          name: clientName || clientEmail,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating/finding customer:', error);
+      return res.status(500).json({ ok: false, message: 'Error with customer management' });
+    }
+
+    // Create meeting first
+    const roomToken = crypto.randomBytes(16).toString('hex');
+    const isMobile = req.headers['user-agent'] && /Mobile|Android|iPhone|iPad/i.test(req.headers['user-agent']);
+    const basePath = isMobile ? '/mobile.html' : '/desktop.html';
+    const meetingUrl = `${req.protocol}://${req.get('host')}${basePath}?room=${roomToken}`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    // Create invoice
+    let invoice;
+    try {
+      const invoiceData = {
+        customer: customer.id,
+        collection_method: 'send_invoice',
+        days_until_due: dueDate ? Math.ceil((new Date(dueDate) - new Date()) / (1000 * 60 * 60 * 24)) : 30,
+        metadata: {
+          meeting_token: roomToken,
+          meeting_url: meetingUrl,
+          host_name: hostName || 'host',
+          max_participants: maxParticipants.toString()
+        }
+      };
+
+      if (template && template !== 'custom') {
+        // Use predefined templates
+        const templates = {
+          consultation: {
+            description: `Video Consultation - ${description}`,
+            amount: amount * 100, // Convert to cents
+            currency
+          },
+          meeting: {
+            description: `Video Meeting - ${description}`,
+            amount: amount * 100,
+            currency
+          },
+          training: {
+            description: `Training Session - ${description}`,
+            amount: amount * 100,
+            currency
+          }
+        };
+
+        if (templates[template]) {
+          invoiceData.description = templates[template].description;
+        }
+      }
+
+      invoice = await stripe.invoices.create(invoiceData);
+
+      // Add invoice item
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        invoice: invoice.id,
+        amount: amount * 100, // Convert to cents
+        currency,
+        description
+      });
+
+      // Finalize and send invoice
+      invoice = await stripe.invoices.finalizeInvoice(invoice.id);
+      await stripe.invoices.sendInvoice(invoice.id);
+
+    } catch (error) {
+      console.error('Error creating invoice:', error);
+      return res.status(500).json({ ok: false, message: 'Error creating invoice' });
+    }
+
+    // Store meeting data with invoice info
+    try {
+      await RedisHelper.createMeeting(roomToken, hostName || 'host', maxParticipants);
+      await RedisHelper.updateSession(roomToken, {
+        createdBy: hostName || 'host',
+        createdAt: new Date().toISOString(),
+        userAgent: req.headers['user-agent'],
+        maxParticipants,
+        expiresAt,
+        invoiceId: invoice.id,
+        customerId: customer.id,
+        amount,
+        currency,
+        paymentStatus: 'pending'
+      });
+    } catch (error) {
+      console.error('Error storing meeting data:', error);
+      // Continue with response even if storage fails
+    }
+
+    res.json({
+      ok: true,
+      token: roomToken,
+      meetingUrl,
+      maxParticipants,
+      expiresAt,
+      invoice: {
+        id: invoice.id,
+        url: invoice.hosted_invoice_url,
+        status: invoice.status,
+        amount_due: invoice.amount_due,
+        currency: invoice.currency,
+        customer_email: clientEmail,
+        due_date: invoice.due_date
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating meeting with invoice:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
+// Stripe webhook endpoint
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed.', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  try {
+    switch (event.type) {
+      case 'invoice.payment_succeeded':
+        const invoice = event.data.object;
+        console.log('Invoice payment succeeded:', invoice.id);
+
+        // Update meeting payment status
+        if (invoice.metadata && invoice.metadata.meeting_token) {
+          await RedisHelper.updateSession(invoice.metadata.meeting_token, {
+            paymentStatus: 'paid',
+            paidAt: new Date().toISOString(),
+            paidAmount: invoice.amount_paid
+          });
+        }
+        break;
+
+      case 'invoice.payment_failed':
+        const failedInvoice = event.data.object;
+        console.log('Invoice payment failed:', failedInvoice.id);
+
+        if (failedInvoice.metadata && failedInvoice.metadata.meeting_token) {
+          await RedisHelper.updateSession(failedInvoice.metadata.meeting_token, {
+            paymentStatus: 'failed',
+            failedAt: new Date().toISOString()
+          });
+        }
+        break;
+
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Error handling webhook:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get invoice status for meeting
+app.get('/api/meetings/:token/invoice', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ ok: false, message: 'No token provided' });
+    }
+
+    const sessionData = await RedisHelper.getSession(token);
+    if (!sessionData || !sessionData.invoiceId) {
+      return res.status(404).json({ ok: false, message: 'No invoice found for this meeting' });
+    }
+
+    const invoice = await stripe.invoices.retrieve(sessionData.invoiceId);
+
+    res.json({
+      ok: true,
+      invoice: {
+        id: invoice.id,
+        status: invoice.status,
+        amount_due: invoice.amount_due,
+        amount_paid: invoice.amount_paid,
+        currency: invoice.currency,
+        hosted_invoice_url: invoice.hosted_invoice_url,
+        payment_status: sessionData.paymentStatus || 'pending',
+        due_date: invoice.due_date,
+        paid_at: sessionData.paidAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting invoice status:', error);
+    res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
 // Get meeting info API
 app.get('/api/meetings/:token', async (req, res) => {
   try {
@@ -1209,10 +1466,23 @@ io.on('connection', (socket) => {
             rooms.delete(currentRoom);
             console.log(`Room ${currentRoom} completely cleaned up - no participants remaining`);
           } else {
+            // Update all remaining participants about the leaving user and new count
+            const participantCount = room.participants.size;
+            const isP2P = participantCount <= 2;
+
             socket.to(currentRoom).emit('user-left', {
               socketId: socket.id,
               displayName: currentUser,
-              participantCount: room.participants.size
+              participantCount,
+              isP2P,
+              connectionType: isP2P ? 'p2p' : 'group'
+            });
+
+            // Send updated room state to all remaining participants
+            socket.to(currentRoom).emit('room-count-updated', {
+              participantCount,
+              isP2P,
+              connectionType: isP2P ? 'p2p' : 'group'
             });
           }
         }

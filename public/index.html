@@ -77,6 +77,7 @@
 
       <div class="meeting-controls">
         <button id="createMeetingBtn" class="btn-primary">Create Meeting</button>
+        <button id="createInvoiceMeetingBtn" class="btn-secondary">Create Meeting + Invoice</button>
 
         <div class="capacity-control">
           <label for="maxParticipants" id="capacityLabel">Max Participants</label>
@@ -99,6 +100,73 @@
         </div>
 
         <div id="meetingMessage" class="status-message"></div>
+      </div>
+
+      <!-- Invoice Creation Modal -->
+      <div id="invoiceModal" class="modal hidden">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3>Create Meeting with Invoice</h3>
+            <button class="modal-close" id="invoiceModalClose">×</button>
+          </div>
+
+          <form id="invoiceForm" class="invoice-form">
+            <div class="form-section">
+              <h4>Client Information</h4>
+              <div class="form-group">
+                <label for="clientEmail">Client Email *</label>
+                <input type="email" id="clientEmail" required>
+              </div>
+              <div class="form-group">
+                <label for="clientName">Client Name</label>
+                <input type="text" id="clientName">
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>Service Details</h4>
+              <div class="form-group">
+                <label for="serviceTemplate">Service Template</label>
+                <select id="serviceTemplate">
+                  <option value="custom">Custom</option>
+                  <option value="consultation">Video Consultation</option>
+                  <option value="meeting">Business Meeting</option>
+                  <option value="training">Training Session</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="serviceDescription">Description *</label>
+                <input type="text" id="serviceDescription" required placeholder="e.g., 1-hour consultation">
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="serviceAmount">Amount *</label>
+                  <input type="number" id="serviceAmount" step="0.01" min="0" required>
+                </div>
+                <div class="form-group">
+                  <label for="serviceCurrency">Currency</label>
+                  <select id="serviceCurrency">
+                    <option value="usd">USD</option>
+                    <option value="eur">EUR</option>
+                    <option value="uah">UAH</option>
+                    <option value="gbp">GBP</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="dueDate">Payment Due Date</label>
+                <input type="date" id="dueDate">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="btn-secondary" id="cancelInvoice">Cancel</button>
+              <button type="submit" class="btn-primary">Create Meeting & Send Invoice</button>
+            </div>
+          </form>
+
+          <div id="invoiceError" class="error-message hidden"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -413,6 +481,131 @@
     copyMeetingBtn.addEventListener('click', copyMeetingLink);
     openMeetingBtn.addEventListener('click', openMeeting);
     maxParticipantsInput.addEventListener('input', updateCapacityDisplay);
+
+    // Invoice modal event listeners
+    const createInvoiceMeetingBtn = document.getElementById('createInvoiceMeetingBtn');
+    const invoiceModal = document.getElementById('invoiceModal');
+    const invoiceModalClose = document.getElementById('invoiceModalClose');
+    const invoiceForm = document.getElementById('invoiceForm');
+    const cancelInvoice = document.getElementById('cancelInvoice');
+    const serviceTemplate = document.getElementById('serviceTemplate');
+    const invoiceError = document.getElementById('invoiceError');
+
+    createInvoiceMeetingBtn.addEventListener('click', openInvoiceModal);
+    invoiceModalClose.addEventListener('click', closeInvoiceModal);
+    cancelInvoice.addEventListener('click', closeInvoiceModal);
+    invoiceForm.addEventListener('submit', handleInvoiceCreation);
+    serviceTemplate.addEventListener('change', handleTemplateChange);
+
+    // Invoice Modal Functions
+    function openInvoiceModal() {
+      invoiceModal.classList.remove('hidden');
+      // Set default due date to 30 days from now
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 30);
+      document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+    }
+
+    function closeInvoiceModal() {
+      invoiceModal.classList.add('hidden');
+      invoiceForm.reset();
+      invoiceError.classList.add('hidden');
+    }
+
+    function handleTemplateChange() {
+      const template = serviceTemplate.value;
+      const descriptionField = document.getElementById('serviceDescription');
+      const amountField = document.getElementById('serviceAmount');
+
+      const templates = {
+        consultation: { description: '1-hour video consultation', amount: 100 },
+        meeting: { description: 'Business meeting session', amount: 75 },
+        training: { description: 'Training session', amount: 150 }
+      };
+
+      if (templates[template]) {
+        descriptionField.value = templates[template].description;
+        amountField.value = templates[template].amount;
+      } else if (template === 'custom') {
+        descriptionField.value = '';
+        amountField.value = '';
+      }
+    }
+
+    async function handleInvoiceCreation(event) {
+      event.preventDefault();
+      invoiceError.classList.add('hidden');
+
+      const invoiceData = {
+        maxParticipants: parseInt(maxParticipantsInput.value),
+        hostName: sessionStorage.getItem('username'),
+        clientEmail: document.getElementById('clientEmail').value,
+        clientName: document.getElementById('clientName').value,
+        amount: parseFloat(document.getElementById('serviceAmount').value),
+        currency: document.getElementById('serviceCurrency').value,
+        description: document.getElementById('serviceDescription').value,
+        dueDate: document.getElementById('dueDate').value,
+        template: document.getElementById('serviceTemplate').value
+      };
+
+      if (!invoiceData.clientEmail || !invoiceData.amount || !invoiceData.description) {
+        showInvoiceError('Please fill in all required fields');
+        return;
+      }
+
+      const submitBtn = invoiceForm.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+
+      try {
+        const response = await fetch('/api/meetings/with-invoice', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionStorage.getItem('authToken')}`,
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(invoiceData)
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.ok) {
+          // Close modal and show success
+          closeInvoiceModal();
+
+          // Use the meeting URL provided by the server
+          meetingLinkInput.value = data.meetingUrl;
+          openMeetingBtn.dataset.roomToken = data.token;
+          meetingBlock.classList.remove('hidden');
+
+          meetingMessage.innerHTML = `
+            <div style="color: green; margin-bottom: 10px;">
+              ✅ Meeting created and invoice sent to ${invoiceData.clientEmail}
+            </div>
+            <div>
+              <strong>Invoice:</strong> ${data.invoice.currency.toUpperCase()} ${(data.invoice.amount_due / 100).toFixed(2)}
+            </div>
+            <div>
+              <a href="${data.invoice.url}" target="_blank" style="color: #4f46e5;">View Invoice</a>
+            </div>
+          `;
+        } else {
+          throw new Error(data.message || 'Failed to create meeting with invoice');
+        }
+      } catch (error) {
+        console.error('Invoice creation error:', error);
+        showInvoiceError(error.message || 'Failed to create meeting with invoice');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Meeting & Send Invoice';
+      }
+    }
+
+    function showInvoiceError(message) {
+      invoiceError.textContent = message;
+      invoiceError.classList.remove('hidden');
+    }
 
     // Initialize
     function init() {

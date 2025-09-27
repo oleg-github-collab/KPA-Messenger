@@ -1005,6 +1005,7 @@ class DesktopVideoCall {
 
     this.socket.on('user-joined', (data) => this.handleUserJoined(data));
     this.socket.on('user-left', (data) => this.handleUserLeft(data));
+    this.socket.on('room-count-updated', (data) => this.handleRoomCountUpdated(data));
     this.socket.on('offer', (data) => this.handleOffer(data));
     this.socket.on('answer', (data) => this.handleAnswer(data));
     this.socket.on('ice-candidate', (data) => this.handleIceCandidate(data));
@@ -1273,12 +1274,19 @@ class DesktopVideoCall {
 
   handleUserLeft(data) {
     console.log('👋 User left:', data.displayName);
+    console.log('🖥️ New participant count:', data.participantCount, 'P2P:', data.isP2P);
     const peerConnection = this.peerConnections.get(data.socketId);
     if (peerConnection) {
       peerConnection.close();
       this.peerConnections.delete(data.socketId);
     }
     this.removeParticipant(data.socketId);
+  }
+
+  handleRoomCountUpdated(data) {
+    console.log('🖥️ Room count updated:', data.participantCount, 'P2P:', data.isP2P);
+    // Force refresh participant count display
+    this.updateParticipantsCount();
   }
 
   // Participant Management
@@ -1842,16 +1850,69 @@ class DesktopVideoCall {
   }
 
   cleanupCall() {
+    console.log('🖥️ Starting comprehensive call cleanup...');
+
+    // Stop all media tracks
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
+      console.log('🖥️ Stopping local stream tracks...');
+      this.localStream.getTracks().forEach(track => {
+        console.log(`🖥️ Stopping ${track.kind} track`);
+        track.stop();
+      });
+      this.localStream = null;
     }
-    this.peerConnections.forEach(pc => pc.close());
+
+    if (this.remoteStream) {
+      console.log('🖥️ Cleaning remote stream...');
+      this.remoteStream.getTracks().forEach(track => track.stop());
+      this.remoteStream = null;
+    }
+
+    // Close all peer connections
+    console.log('🖥️ Closing peer connections...');
+    this.peerConnections.forEach((pc, id) => {
+      console.log(`🖥️ Closing peer connection: ${id}`);
+      pc.close();
+    });
+    this.peerConnections.clear();
+
+    // Clear participants
+    this.participants.clear();
+
+    // Reset video elements
+    if (this.localVideo) {
+      this.localVideo.srcObject = null;
+    }
+    if (this.remoteVideo) {
+      this.remoteVideo.srcObject = null;
+    }
+
+    // Disconnect socket cleanly
     if (this.socket) {
+      console.log('🖥️ Disconnecting socket...');
       this.socket.disconnect();
+      this.socket = null;
     }
+
+    // Clear all timers
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
+      this.timerInterval = null;
     }
+
+    // Reset call state
+    this.callStartTime = null;
+    this.isVideoEnabled = false;
+    this.isAudioEnabled = false;
+    this.roomToken = null;
+    this.displayName = null;
+
+    // Clear session storage
+    sessionStorage.removeItem('currentMeetingToken');
+    sessionStorage.removeItem('enableVideo');
+    sessionStorage.removeItem('enableAudio');
+
+    console.log('✅ Desktop call cleanup completed');
   }
 
   handleKeyboardShortcuts(event) {
