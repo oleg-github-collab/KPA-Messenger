@@ -19,9 +19,9 @@ const io = new Server(server, {
   cors: {
     origin: '*',
   },
-  pingTimeout: 20000,
-  pingInterval: 10000,
-  connectTimeout: 15000,
+  pingTimeout: 10000,
+  pingInterval: 5000,
+  connectTimeout: 8000,
   maxHttpBufferSize: 1e6,
   transports: ['websocket', 'polling'],
   allowEIO3: true,
@@ -1047,10 +1047,15 @@ io.on('connection', (socket) => {
       });
 
       // Notify others
+      const participantCount = room.participants.size;
+      const isP2P = participantCount <= 2;
+
       socket.to(roomToken).emit('user-joined', {
         socketId: socket.id,
         displayName,
-        participantCount: room.participants.size
+        participantCount,
+        isP2P,
+        connectionType: isP2P ? 'p2p' : 'group'
       });
 
       // Send current room state
@@ -1059,7 +1064,10 @@ io.on('connection', (socket) => {
         participants: roomParticipants,
         polls: Array.from(room.polls.values()),
         emotionalClimate: room.emotions,
-        activeTests: Array.from(room.tests.values()).filter(test => test.status === 'active')
+        activeTests: Array.from(room.tests.values()).filter(test => test.status === 'active'),
+        participantCount,
+        isP2P,
+        connectionType: isP2P ? 'p2p' : 'group'
       });
 
       console.log(`${displayName} joined room ${roomToken}`);

@@ -374,17 +374,18 @@ class MobileVideoCall {
       // Optimized mobile constraints for quality and performance
       const constraints = {
         video: videoEnabled ? {
-          width: { ideal: 720, min: 360, max: 1280 },
-          height: { ideal: 480, min: 240, max: 720 },
+          width: { ideal: 1280, min: 480, max: 1920 },
+          height: { ideal: 720, min: 320, max: 1080 },
           facingMode: this.facingMode,
-          frameRate: { ideal: 25, min: 15 }
+          frameRate: { ideal: 30, min: 15, max: 60 }
         } : false,
         audio: audioEnabled ? {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: { ideal: 48000 },
-          channelCount: { ideal: 1 }
+          echoCancellation: { exact: true },
+          noiseSuppression: { exact: true },
+          autoGainControl: { exact: true },
+          sampleRate: { ideal: 48000, min: 44100 },
+          channelCount: { ideal: 2, min: 1 },
+          latency: { ideal: 0.01, max: 0.1 }
         } : false
       };
 
@@ -912,20 +913,45 @@ class MobileVideoCall {
   }
 
   // WebRTC Functions (simplified for mobile)
-  async createPeerConnection(participantId) {
-    const peerConnection = new RTCPeerConnection({
+  getOptimalWebRTCConfig() {
+    const participantCount = this.participants.size;
+    console.log('📱 Getting WebRTC config for participant count:', participantCount);
+
+    // For 2 people (1-on-1), use optimized P2P with STUN only
+    if (participantCount <= 2) {
+      console.log('📱 Using optimized P2P configuration for 1-on-1 call');
+      return {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 0, // Minimal for P2P
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        iceTransportPolicy: 'all'
+      };
+    }
+
+    // For group calls (3+), use full STUN configuration
+    console.log('📱 Using full STUN configuration for group call');
+    return {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' }
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require',
-      iceGatheringTimeoutMs: 5000
-    });
+      rtcpMuxPolicy: 'require'
+    };
+  }
+
+  async createPeerConnection(participantId) {
+    const config = this.getOptimalWebRTCConfig();
+    console.log('📱 Creating peer connection with config:', config);
+    const peerConnection = new RTCPeerConnection(config);
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate && this.socket) {
@@ -940,11 +966,14 @@ class MobileVideoCall {
     peerConnection.ontrack = (event) => {
       console.log('📱 Received remote stream from:', participantId, 'Event:', event);
       console.log('📱 Streams in event:', event.streams.length);
-      console.log('📱 Tracks in event:', event.track);
+      console.log('📱 Track in event:', event.track.kind, 'enabled:', event.track.enabled, 'state:', event.track.readyState);
 
       if (event.streams && event.streams.length > 0) {
         const stream = event.streams[0];
-        console.log('📱 Stream tracks:', stream.getTracks().map(t => `${t.kind}:${t.enabled}`));
+        console.log('📱 Stream tracks:', stream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
+
+        // Store stream immediately
+        this.remoteStream = stream;
 
         const participant = this.participants.get(participantId);
         if (participant) {
@@ -956,6 +985,19 @@ class MobileVideoCall {
           // Try to update video anyway in case participant isn't properly tracked
           this.updateRemoteVideo(stream, `User ${participantId.substring(0, 8)}`);
         }
+
+        // Additional track event listeners for debugging
+        stream.getTracks().forEach(track => {
+          track.addEventListener('ended', () => {
+            console.log('📱 Remote track ended:', track.kind);
+          });
+          track.addEventListener('mute', () => {
+            console.log('📱 Remote track muted:', track.kind);
+          });
+          track.addEventListener('unmute', () => {
+            console.log('📱 Remote track unmuted:', track.kind);
+          });
+        });
       } else {
         console.error('❌ No streams in ontrack event');
       }
@@ -1024,6 +1066,7 @@ class MobileVideoCall {
     if (this.remoteVideo && stream) {
       this.remoteVideo.srcObject = stream;
       this.remoteVideo.style.display = 'block';
+      this.remoteVideo.play().catch(e => console.log('📱 Auto-play handled:', e.message));
 
       if (this.remotePlaceholder) {
         this.remotePlaceholder.style.display = 'none';
@@ -1034,14 +1077,34 @@ class MobileVideoCall {
         this.speakerName.textContent = participantName;
       }
 
+      // Force refresh of video element
+      setTimeout(() => {
+        if (this.remoteVideo.videoWidth > 0) {
+          console.log('✅ Remote video stream active:', this.remoteVideo.videoWidth + 'x' + this.remoteVideo.videoHeight);
+        } else {
+          console.log('⚠️ Remote video stream has no video tracks or is audio only');
+        }
+      }, 1000);
+
       console.log('✅ Mobile remote video updated successfully');
     } else {
       console.warn('⚠️ Cannot update remote video - missing video element or stream');
+      // Show placeholder if no stream
+      if (this.remotePlaceholder) {
+        this.remotePlaceholder.style.display = 'flex';
+        if (this.speakerName) {
+          this.speakerName.textContent = participantName || 'Waiting for participant...';
+        }
+      }
+      if (this.remoteVideo) {
+        this.remoteVideo.style.display = 'none';
+      }
     }
   }
 
   async handleUserJoined(data) {
     console.log('👋 Mobile - User joined:', data.displayName);
+    console.log('📱 Connection type:', data.connectionType, 'P2P:', data.isP2P, 'Count:', data.participantCount);
     console.log('📱 Current local stream state:', this.localStream ? 'Available' : 'Not available');
     if (this.localStream) {
       console.log('📱 Local stream tracks when user joins:', this.localStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
@@ -1055,11 +1118,20 @@ class MobileVideoCall {
 
     const peerConnection = await this.createPeerConnection(data.socketId);
     console.log('📱 Creating offer for:', data.displayName);
-    const offer = await peerConnection.createOffer({
+    // Use optimized offer options for P2P
+    const isP2P = data.isP2P || this.participants.size <= 2;
+    const offerOptions = isP2P ? {
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true,
+      iceRestart: false,
+      voiceActivityDetection: false
+    } : {
       offerToReceiveAudio: true,
       offerToReceiveVideo: true,
       iceRestart: false
-    });
+    };
+    console.log('📱 Creating offer with options:', offerOptions, 'P2P:', isP2P);
+    const offer = await peerConnection.createOffer(offerOptions);
     console.log('📱 Offer SDP contains video:', offer.sdp.includes('m=video'));
     console.log('📱 Offer SDP contains audio:', offer.sdp.includes('m=audio'));
     await peerConnection.setLocalDescription(offer);

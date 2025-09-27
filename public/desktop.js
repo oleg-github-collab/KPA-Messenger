@@ -402,17 +402,18 @@ class DesktopVideoCall {
       // Balanced constraints for good quality and speed
       const constraints = {
         video: {
-          width: { ideal: 960, min: 480, max: 1280 },
-          height: { ideal: 540, min: 360, max: 720 },
-          frameRate: { ideal: 30, min: 20 },
+          width: { ideal: 1280, min: 640, max: 1920 },
+          height: { ideal: 720, min: 480, max: 1080 },
+          frameRate: { ideal: 30, min: 20, max: 60 },
           facingMode: 'user'
         },
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: { ideal: 48000 },
-          channelCount: { ideal: 1 }
+          echoCancellation: { exact: true },
+          noiseSuppression: { exact: true },
+          autoGainControl: { exact: true },
+          sampleRate: { ideal: 48000, min: 44100 },
+          channelCount: { ideal: 2, min: 1 },
+          latency: { ideal: 0.01, max: 0.1 }
         }
       };
 
@@ -1037,20 +1038,45 @@ class DesktopVideoCall {
   }
 
   // WebRTC Functions (simplified)
-  async createPeerConnection(participantId) {
-    const peerConnection = new RTCPeerConnection({
+  getOptimalWebRTCConfig() {
+    const participantCount = this.participants.size;
+    console.log('🖥️ Getting WebRTC config for participant count:', participantCount);
+
+    // For 2 people (1-on-1), use optimized P2P with STUN only
+    if (participantCount <= 2) {
+      console.log('🖥️ Using optimized P2P configuration for 1-on-1 call');
+      return {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 0, // Minimal for P2P
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        iceTransportPolicy: 'all'
+      };
+    }
+
+    // For group calls (3+), use full STUN configuration
+    console.log('🖥️ Using full STUN configuration for group call');
+    return {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' }
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require',
-      iceGatheringTimeoutMs: 5000
-    });
+      rtcpMuxPolicy: 'require'
+    };
+  }
+
+  async createPeerConnection(participantId) {
+    const config = this.getOptimalWebRTCConfig();
+    console.log('🖥️ Creating peer connection with config:', config);
+    const peerConnection = new RTCPeerConnection(config);
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate && this.socket) {
@@ -1174,6 +1200,7 @@ class DesktopVideoCall {
 
   async handleUserJoined(data) {
     console.log('👋 Desktop - User joined:', data.displayName);
+    console.log('🖥️ Connection type:', data.connectionType, 'P2P:', data.isP2P, 'Count:', data.participantCount);
     console.log('🖥️ Current local stream state:', this.localStream ? 'Available' : 'Not available');
     if (this.localStream) {
       console.log('🖥️ Local stream tracks when user joins:', this.localStream.getTracks().map(t => `${t.kind}:${t.enabled}:${t.readyState}`));
@@ -1187,11 +1214,20 @@ class DesktopVideoCall {
 
     const peerConnection = await this.createPeerConnection(data.socketId);
     console.log('🖥️ Creating offer for:', data.displayName);
-    const offer = await peerConnection.createOffer({
+    // Use optimized offer options for P2P
+    const isP2P = data.isP2P || this.participants.size <= 2;
+    const offerOptions = isP2P ? {
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true,
+      iceRestart: false,
+      voiceActivityDetection: false
+    } : {
       offerToReceiveAudio: true,
       offerToReceiveVideo: true,
       iceRestart: false
-    });
+    };
+    console.log('🖥️ Creating offer with options:', offerOptions, 'P2P:', isP2P);
+    const offer = await peerConnection.createOffer(offerOptions);
     console.log('🖥️ Offer SDP contains video:', offer.sdp.includes('m=video'));
     console.log('🖥️ Offer SDP contains audio:', offer.sdp.includes('m=audio'));
     await peerConnection.setLocalDescription(offer);
