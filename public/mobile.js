@@ -261,7 +261,75 @@ class MobileVideoCall {
     }
 
     console.log('✅ Name submitted:', name);
+    await this.requestAllPermissions();
     await this.initializeCall(videoEnabled, audioEnabled);
+  }
+
+  async requestAllPermissions() {
+    console.log('📱🔐 Requesting all necessary mobile permissions...');
+
+    try {
+      // Request microphone and camera permissions first
+      console.log('📱🎤📹 Requesting mobile audio/video permissions...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+
+      // Test the stream briefly then stop it
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        console.log('✅ Mobile Audio/Video permissions granted');
+      }
+
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        console.log('📱🔔 Requesting mobile notification permission...');
+        const permission = await Notification.requestPermission();
+        console.log('📱📢 Mobile notification permission:', permission);
+      }
+
+      // Request wake lock permission for preventing sleep
+      if ('wakeLock' in navigator) {
+        try {
+          console.log('📱⏰ Wake Lock API available');
+        } catch (error) {
+          console.log('📱⏰ Wake Lock API unavailable');
+        }
+      }
+
+      console.log('✅ All mobile permission requests completed');
+
+    } catch (error) {
+      console.warn('⚠️ Some mobile permissions were denied:', error);
+      this.showMobilePermissionWarning();
+    }
+  }
+
+  showMobilePermissionWarning() {
+    const warning = document.createElement('div');
+    warning.className = 'mobile-permission-warning';
+    warning.innerHTML = `
+      <div class="mobile-warning-content">
+        <h4>⚠️ Permissions Required</h4>
+        <p>For the best mobile experience, please allow:</p>
+        <ul>
+          <li>🎤 Microphone - for voice calls</li>
+          <li>📹 Camera - for video calls</li>
+          <li>🔔 Notifications - for call alerts</li>
+        </ul>
+        <p>Tap browser settings to enable permissions.</p>
+        <button onclick="this.parentElement.parentElement.remove()">Continue</button>
+      </div>
+    `;
+
+    document.body.appendChild(warning);
+
+    setTimeout(() => {
+      if (document.body.contains(warning)) {
+        warning.remove();
+      }
+    }, 8000);
   }
 
   async initializeCall(videoEnabled = true, audioEnabled = true) {

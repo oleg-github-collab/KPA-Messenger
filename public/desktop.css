@@ -632,8 +632,384 @@ body {
     transition: var(--transition-fast);
 }
 
+.private-message-btn {
+    width: 24px;
+    height: 24px;
+    background: var(--primary-color);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: white;
+    transition: var(--transition-fast);
+}
+
+.private-message-btn:hover {
+    background: var(--primary-hover);
+    transform: scale(1.1);
+}
+
+.private-message-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--primary-color);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin: 0 8px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.close-private-btn {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    margin-left: 8px;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: var(--transition-fast);
+}
+
+.close-private-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Emoji Picker */
+.emoji-picker-container {
+    position: relative;
+}
+
+.emoji-toggle-btn {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 6px;
+    transition: var(--transition-fast);
+}
+
+.emoji-toggle-btn:hover {
+    background: var(--background-tertiary);
+}
+
+.emoji-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: var(--shadow-xl);
+    padding: 12px;
+    width: 280px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    margin-bottom: 8px;
+}
+
+.emoji-picker.hidden {
+    display: none;
+}
+
+.emoji-quick-reactions {
+    display: flex;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 12px;
+}
+
+.emoji-categories {
+    display: grid;
+    gap: 8px;
+}
+
+.emoji-category {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+}
+
+.emoji-option {
+    font-size: 20px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 6px;
+    transition: var(--transition-fast);
+    text-align: center;
+    user-select: none;
+}
+
+.emoji-option:hover {
+    background: var(--background-tertiary);
+    transform: scale(1.2);
+}
+
+/* Session Management Modals */
+.session-warning-modal,
+.final-countdown-modal,
+.migration-status-modal,
+.session-end-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
+    backdrop-filter: var(--backdrop-blur);
+}
+
+.session-warning-modal .modal-content,
+.final-countdown-modal .modal-content,
+.migration-status-modal .modal-content,
+.session-end-modal .modal-content {
+    background: white;
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: var(--shadow-xl);
+    text-align: center;
+}
+
+.warning-header h3,
+.countdown-header h3,
+.migration-header h3,
+.end-header h3 {
+    margin-bottom: 16px;
+    color: var(--text-primary);
+    font-size: 20px;
+}
+
+.warning-body,
+.countdown-body,
+.migration-body,
+.end-body {
+    margin-bottom: 24px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.countdown-timer {
+    font-size: 48px;
+    font-weight: bold;
+    color: var(--error-color);
+    margin: 16px 0;
+    font-family: monospace;
+}
+
+.warning-actions,
+.countdown-actions,
+.end-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.migrate-btn,
+.dismiss-btn,
+.end-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.migrate-btn {
+    background: var(--primary-color);
+    color: white;
+}
+
+.migrate-btn:hover {
+    background: var(--primary-hover);
+}
+
+.dismiss-btn {
+    background: var(--background-tertiary);
+    color: var(--text-primary);
+}
+
+.dismiss-btn:hover {
+    background: var(--background-secondary);
+}
+
+.end-btn {
+    background: var(--error-color);
+    color: white;
+}
+
+.end-btn:hover {
+    background: #dc2626;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--background-tertiary);
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Large Group Optimizations for 20 participants */
+.participant-list {
+    max-height: calc(100vh - 400px);
+    overflow-y: auto;
+}
+
+.participant-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.participant-list::-webkit-scrollbar-track {
+    background: var(--background-tertiary);
+    border-radius: 3px;
+}
+
+.participant-list::-webkit-scrollbar-thumb {
+    background: var(--secondary-color);
+    border-radius: 3px;
+}
+
+.participant-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}
+
+/* Compact participant items for large groups */
+.participant-list.large-group .participant-item {
+    padding: 8px 12px;
+    min-height: 48px;
+}
+
+.participant-list.large-group .participant-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+}
+
+.participant-list.large-group .participant-name {
+    font-size: 13px;
+}
+
+.participant-list.large-group .participant-status {
+    font-size: 11px;
+}
+
+.participant-list.large-group .control-btn,
+.participant-list.large-group .private-message-btn {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+}
+
+/* Grid view optimizations for 20 participants */
+.grid-view.large-group {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    padding: 8px;
+}
+
+.grid-view.large-group .grid-tile {
+    aspect-ratio: 16/9;
+    min-height: 120px;
+}
+
+.grid-view.large-group .grid-name {
+    font-size: 11px;
+    padding: 4px 6px;
+}
+
+.grid-view.large-group .grid-avatar {
+    font-size: 18px;
+}
+
 .participant-item:hover .participant-controls {
     opacity: 1;
+}
+
+/* Permission Warning */
+.permission-warning {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--z-modal);
+    backdrop-filter: var(--backdrop-blur);
+}
+
+.warning-content {
+    background: white;
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: var(--shadow-xl);
+    text-align: center;
+}
+
+.warning-content h4 {
+    margin-bottom: 16px;
+    color: var(--warning-color);
+    font-size: 18px;
+}
+
+.warning-content ul {
+    text-align: left;
+    margin: 16px 0;
+    padding-left: 20px;
+}
+
+.warning-content li {
+    margin: 8px 0;
+    color: var(--text-secondary);
+}
+
+.warning-content button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 16px;
+    transition: var(--transition-fast);
+}
+
+.warning-content button:hover {
+    background: var(--primary-hover);
 }
 
 .control-btn {
@@ -1098,7 +1474,7 @@ body {
 .connection-indicator {
     position: absolute;
     top: 20px;
-    left: 20px;
+    right: 380px; /* Move to empty space, away from sidebar */
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: var(--backdrop-blur);
     padding: 8px 12px;
@@ -1106,6 +1482,9 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    z-index: var(--z-controls);
+    color: white;
+    font-size: 12px;
 }
 
 .connection-indicator.bottom-right {

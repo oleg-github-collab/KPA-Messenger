@@ -100,6 +100,10 @@ class DesktopVideoCall {
     this.assistantSend = document.getElementById('assistantSend');
     this.webSearchToggle = document.getElementById('webSearchToggle');
 
+    // Emoji picker elements
+    this.emojiToggleBtn = document.getElementById('emojiToggleBtn');
+    this.emojiPicker = document.getElementById('emojiPicker');
+
     console.log('✅ Elements initialized successfully');
   }
 
@@ -197,6 +201,14 @@ class DesktopVideoCall {
       });
     }
 
+    // Emoji picker functionality
+    if (this.emojiToggleBtn) {
+      this.emojiToggleBtn.addEventListener('click', () => this.toggleEmojiPicker());
+    }
+
+    // Setup emoji selection
+    this.setupEmojiPicker();
+
     // Sidebar controls
     if (this.sidebarToggle) {
       this.sidebarToggle.addEventListener('click', () => this.toggleSidebar());
@@ -272,7 +284,79 @@ class DesktopVideoCall {
     }
 
     console.log('✅ Name submitted:', name);
+    await this.requestAllPermissions();
     await this.initializeCall();
+  }
+
+  async requestAllPermissions() {
+    console.log('🔐 Requesting all necessary permissions...');
+
+    try {
+      // Request microphone and camera permissions first
+      console.log('🎤📹 Requesting audio/video permissions...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+
+      // Test the stream briefly then stop it
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        console.log('✅ Audio/Video permissions granted');
+      }
+
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        console.log('🔔 Requesting notification permission...');
+        const permission = await Notification.requestPermission();
+        console.log('📢 Notification permission:', permission);
+      }
+
+      // Request clipboard permission (for sharing links)
+      if ('clipboard' in navigator && 'writeText' in navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText('');
+          console.log('📋 Clipboard permission available');
+        } catch (error) {
+          console.log('📋 Clipboard permission denied or unavailable');
+        }
+      }
+
+      // Request fullscreen permission
+      console.log('🖥️ Fullscreen API available:', !!document.documentElement.requestFullscreen);
+
+      console.log('✅ All permission requests completed');
+
+    } catch (error) {
+      console.warn('⚠️ Some permissions were denied:', error);
+      this.showPermissionWarning();
+    }
+  }
+
+  showPermissionWarning() {
+    const warning = document.createElement('div');
+    warning.className = 'permission-warning';
+    warning.innerHTML = `
+      <div class="warning-content">
+        <h4>⚠️ Permissions Required</h4>
+        <p>For the best experience, please allow access to:</p>
+        <ul>
+          <li>🎤 Microphone - for audio communication</li>
+          <li>📹 Camera - for video communication</li>
+          <li>🔔 Notifications - for alerts</li>
+        </ul>
+        <p>You can enable these in your browser settings.</p>
+        <button onclick="this.parentElement.parentElement.remove()">Continue</button>
+      </div>
+    `;
+
+    document.body.appendChild(warning);
+
+    setTimeout(() => {
+      if (document.body.contains(warning)) {
+        warning.remove();
+      }
+    }, 8000);
   }
 
   async initializeCall() {
@@ -1055,6 +1139,23 @@ class DesktopVideoCall {
     if (this.participantsCount) {
       this.participantsCount.textContent = `Participants (${count})`;
     }
+
+    // Apply large group optimizations for 8+ participants
+    if (this.participantList) {
+      if (count >= 8) {
+        this.participantList.classList.add('large-group');
+      } else {
+        this.participantList.classList.remove('large-group');
+      }
+    }
+
+    if (this.gridView) {
+      if (count >= 8) {
+        this.gridView.classList.add('large-group');
+      } else {
+        this.gridView.classList.remove('large-group');
+      }
+    }
   }
 
   updateParticipantsList() {
@@ -1085,28 +1186,297 @@ class DesktopVideoCall {
         <div class="participant-controls">
           <button class="control-btn" title="Participant audio">🎤</button>
           <button class="control-btn" title="Participant video">📹</button>
+          <button class="private-message-btn" title="Send private message" data-participant-id="${id}">💬</button>
         </div>
       `;
 
       this.participantList.appendChild(participantEl);
+
+      // Add event listener for private message button
+      const privateMessageBtn = participantEl.querySelector('.private-message-btn');
+      if (privateMessageBtn) {
+        privateMessageBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.openPrivateMessage(id, participant.displayName);
+        });
+      }
     });
 
     console.log(`✅ Desktop participants list updated: ${this.participants.size} total participants`);
   }
 
+  openPrivateMessage(participantId, participantName) {
+    console.log(`💬 Opening private message for ${participantName}`);
+
+    // Switch to chat mode and focus on private messaging
+    if (this.desktopChatOverlay) {
+      this.desktopChatOverlay.classList.remove('hidden');
+
+      // Add private message indicator
+      const chatHeader = this.desktopChatOverlay.querySelector('.desktop-chat-header');
+      let privateIndicator = chatHeader.querySelector('.private-message-indicator');
+
+      if (!privateIndicator) {
+        privateIndicator = document.createElement('div');
+        privateIndicator.className = 'private-message-indicator';
+        chatHeader.appendChild(privateIndicator);
+      }
+
+      privateIndicator.innerHTML = `
+        <span>💬 Private chat with ${participantName}</span>
+        <button class="close-private-btn" onclick="this.parentElement.remove()">×</button>
+      `;
+
+      // Focus chat input
+      if (this.desktopChatInput) {
+        this.desktopChatInput.focus();
+        this.desktopChatInput.placeholder = `Send private message to ${participantName}...`;
+        this.desktopChatInput.dataset.privateTarget = participantId;
+      }
+    }
+  }
+
+  // Emoji Picker Functions
+  setupEmojiPicker() {
+    if (!this.emojiPicker) return;
+
+    // Add event listeners to all emoji options
+    const emojiOptions = this.emojiPicker.querySelectorAll('.emoji-option');
+    emojiOptions.forEach(option => {
+      option.addEventListener('click', () => {
+        const emoji = option.dataset.emoji;
+        this.insertEmoji(emoji);
+        this.hideEmojiPicker();
+      });
+    });
+
+    // Close emoji picker when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!this.emojiPicker.contains(e.target) && !this.emojiToggleBtn.contains(e.target)) {
+        this.hideEmojiPicker();
+      }
+    });
+  }
+
+  toggleEmojiPicker() {
+    if (!this.emojiPicker) return;
+
+    if (this.emojiPicker.classList.contains('hidden')) {
+      this.showEmojiPicker();
+    } else {
+      this.hideEmojiPicker();
+    }
+  }
+
+  showEmojiPicker() {
+    if (this.emojiPicker) {
+      this.emojiPicker.classList.remove('hidden');
+    }
+  }
+
+  hideEmojiPicker() {
+    if (this.emojiPicker) {
+      this.emojiPicker.classList.add('hidden');
+    }
+  }
+
+  insertEmoji(emoji) {
+    if (!this.desktopChatInput) return;
+
+    const cursorPosition = this.desktopChatInput.selectionStart;
+    const textBefore = this.desktopChatInput.value.substring(0, cursorPosition);
+    const textAfter = this.desktopChatInput.value.substring(this.desktopChatInput.selectionEnd);
+
+    this.desktopChatInput.value = textBefore + emoji + textAfter;
+    this.desktopChatInput.selectionStart = this.desktopChatInput.selectionEnd = cursorPosition + emoji.length;
+    this.desktopChatInput.focus();
+  }
+
   // Utility Functions
   startCallTimer() {
     this.callStartTime = Date.now();
+    this.maxSessionDuration = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+    this.warningShown = false;
+
     this.timerInterval = setInterval(() => {
       if (!this.timerValue) return;
 
       const elapsed = Date.now() - this.callStartTime;
-      const minutes = Math.floor(elapsed / 60000);
+      const hours = Math.floor(elapsed / 3600000);
+      const minutes = Math.floor((elapsed % 3600000) / 60000);
       const seconds = Math.floor((elapsed % 60000) / 1000);
 
-      const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      let timeString;
+      if (hours > 0) {
+        timeString = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      } else {
+        timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      }
+
       this.timerValue.textContent = timeString;
+
+      // Check for 8-hour limit
+      const timeRemaining = this.maxSessionDuration - elapsed;
+      const minutesRemaining = Math.floor(timeRemaining / 60000);
+
+      if (minutesRemaining <= 10 && !this.warningShown) {
+        this.showSessionWarning(minutesRemaining);
+        this.warningShown = true;
+      }
+
+      if (elapsed >= this.maxSessionDuration) {
+        this.handleSessionExpiration();
+      }
     }, 1000);
+  }
+
+  showSessionWarning(minutesRemaining) {
+    console.log(`⏰ Showing session warning: ${minutesRemaining} minutes remaining`);
+
+    const modal = document.createElement('div');
+    modal.className = 'session-warning-modal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="warning-header">
+          <h3>⏰ Session Expiring Soon</h3>
+        </div>
+        <div class="warning-body">
+          <p>This meeting will reach the 8-hour limit in ${minutesRemaining} minutes.</p>
+          <p>As the host, you can migrate all participants to a new room.</p>
+        </div>
+        <div class="warning-actions">
+          <button class="btn-primary migrate-btn" onclick="this.handleRoomMigration()">Migrate to New Room</button>
+          <button class="btn-secondary dismiss-btn" onclick="this.parentElement.parentElement.parentElement.remove()">Continue Session</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Auto-migrate decision countdown
+    setTimeout(() => {
+      if (document.body.contains(modal)) {
+        this.showFinalCountdown();
+      }
+    }, (minutesRemaining - 5) * 60000); // Show final countdown with 5 minutes left
+  }
+
+  showFinalCountdown() {
+    console.log('🔔 Showing final countdown modal');
+
+    const modal = document.createElement('div');
+    modal.className = 'final-countdown-modal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="countdown-header">
+          <h3>🚨 Final Warning</h3>
+        </div>
+        <div class="countdown-body">
+          <p>You have 5 minutes to decide:</p>
+          <div class="countdown-timer" id="finalCountdownTimer">5:00</div>
+          <p>Choose to migrate participants or the session will end.</p>
+        </div>
+        <div class="countdown-actions">
+          <button class="btn-primary migrate-btn" onclick="this.handleRoomMigration()">Migrate Now</button>
+          <button class="btn-danger end-btn" onclick="this.endSession()">End Session</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Start 5-minute countdown
+    let timeLeft = 5 * 60; // 5 minutes in seconds
+    const countdownTimer = modal.querySelector('#finalCountdownTimer');
+
+    const countdown = setInterval(() => {
+      const minutes = Math.floor(timeLeft / 60);
+      const seconds = timeLeft % 60;
+      countdownTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+      if (timeLeft <= 0) {
+        clearInterval(countdown);
+        this.endSession();
+        modal.remove();
+      }
+
+      timeLeft--;
+    }, 1000);
+  }
+
+  handleSessionExpiration() {
+    console.log('⏰ Session has reached 8-hour limit');
+    this.showFinalCountdown();
+  }
+
+  handleRoomMigration() {
+    console.log('🔄 Initiating room migration...');
+
+    if (this.socket) {
+      this.socket.emit('request-room-migration', {
+        roomToken: this.roomToken,
+        hostName: this.displayName,
+        participants: Array.from(this.participants.keys())
+      });
+    }
+
+    // Show migration status
+    const statusModal = document.createElement('div');
+    statusModal.className = 'migration-status-modal';
+    statusModal.innerHTML = `
+      <div class="modal-content">
+        <div class="migration-header">
+          <h3>🔄 Migrating to New Room</h3>
+        </div>
+        <div class="migration-body">
+          <div class="loading-spinner"></div>
+          <p>Creating new room and transferring participants...</p>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(statusModal);
+  }
+
+  endSession() {
+    console.log('🔚 Ending session...');
+
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Notify all participants
+    if (this.socket) {
+      this.socket.emit('end-session', {
+        roomToken: this.roomToken,
+        reason: 'Session time limit reached'
+      });
+    }
+
+    // Close all peer connections
+    this.peerConnections.forEach(connection => {
+      connection.close();
+    });
+
+    // Show session ended message
+    const endModal = document.createElement('div');
+    endModal.className = 'session-end-modal';
+    endModal.innerHTML = `
+      <div class="modal-content">
+        <div class="end-header">
+          <h3>📞 Session Ended</h3>
+        </div>
+        <div class="end-body">
+          <p>The 8-hour session limit has been reached.</p>
+          <p>Thank you for using KPA Messenger!</p>
+        </div>
+        <div class="end-actions">
+          <button class="btn-primary" onclick="window.location.href='/'">Return to Home</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(endModal);
   }
 
   updateConnectionStatus(status) {

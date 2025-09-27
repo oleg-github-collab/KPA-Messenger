@@ -80,8 +80,8 @@
 
         <div class="capacity-control">
           <label for="maxParticipants" id="capacityLabel">Max Participants</label>
-          <input type="range" id="maxParticipants" min="2" max="10" value="10">
-          <span class="capacity-value" id="capacityValue">10 participants</span>
+          <input type="range" id="maxParticipants" min="2" max="20" value="20">
+          <span class="capacity-value" id="capacityValue">20 participants</span>
         </div>
       </div>
 
@@ -323,7 +323,7 @@
           meetingLinkInput.value = data.meetingUrl;
           openMeetingBtn.dataset.roomToken = data.token;
           meetingBlock.classList.remove('hidden');
-          meetingMessage.textContent = `Ready for ${t('capacityValue', data.maxParticipants || 10)}`;
+          meetingMessage.textContent = `Ready for ${t('capacityValue', data.maxParticipants || 20)}`;
         } else {
           throw new Error(data.message || t('meetingError'));
         }
