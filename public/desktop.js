@@ -308,22 +308,37 @@ class DesktopVideoCall {
     try {
       console.log('🎬 Requesting media access...');
 
+      // Enhanced constraints for better quality and reliability
       const constraints = {
         video: {
-          width: { ideal: 1280, min: 640 },
-          height: { ideal: 720, min: 480 },
+          width: { ideal: 1280, min: 640, max: 1920 },
+          height: { ideal: 720, min: 480, max: 1080 },
           facingMode: 'user',
-          frameRate: { ideal: 30, min: 15 }
+          frameRate: { ideal: 30, min: 15, max: 60 }
         },
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+          echoCancellation: { exact: true },
+          noiseSuppression: { exact: true },
+          autoGainControl: { exact: true },
+          sampleRate: { ideal: 48000, min: 44100 },
+          channelCount: { ideal: 2, min: 1 },
+          latency: { ideal: 0.01, max: 0.1 }
         }
       };
 
-      console.log('📞 Calling getUserMedia with constraints:', constraints);
-      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('📞 Calling getUserMedia with enhanced constraints:', constraints);
+
+      // Try with enhanced constraints first, fallback if needed
+      try {
+        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (enhancedError) {
+        console.log('Enhanced constraints failed, trying basic ones:', enhancedError);
+        const basicConstraints = {
+          video: { width: 640, height: 480, frameRate: 30 },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        };
+        this.localStream = await navigator.mediaDevices.getUserMedia(basicConstraints);
+      }
 
       const videoTracks = this.localStream.getVideoTracks();
       const audioTracks = this.localStream.getAudioTracks();
@@ -872,8 +887,15 @@ class DesktopVideoCall {
   async createPeerConnection(participantId) {
     const peerConnection = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
-      ]
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
     });
 
     peerConnection.onicecandidate = (event) => {
@@ -895,6 +917,23 @@ class DesktopVideoCall {
       }
     };
 
+    // Enhanced connection monitoring
+    peerConnection.onconnectionstatechange = () => {
+      console.log(`Connection state changed for ${participantId}:`, peerConnection.connectionState);
+      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+        console.log('Connection failed, attempting reconnection...');
+        setTimeout(() => this.handleReconnection(participantId), 1000);
+      }
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log(`ICE connection state for ${participantId}:`, peerConnection.iceConnectionState);
+      if (peerConnection.iceConnectionState === 'failed') {
+        console.log('ICE connection failed, attempting restart...');
+        peerConnection.restartIce();
+      }
+    };
+
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, this.localStream);
@@ -903,6 +942,32 @@ class DesktopVideoCall {
 
     this.peerConnections.set(participantId, peerConnection);
     return peerConnection;
+  }
+
+  async handleReconnection(participantId) {
+    try {
+      console.log(`Attempting reconnection for ${participantId}...`);
+      const oldConnection = this.peerConnections.get(participantId);
+      if (oldConnection) {
+        oldConnection.close();
+        this.peerConnections.delete(participantId);
+      }
+
+      // Create new connection
+      const newConnection = await this.createPeerConnection(participantId);
+
+      // Restart the call process
+      if (this.socket) {
+        this.socket.emit('request-reconnection', {
+          roomToken: this.roomToken,
+          targetId: participantId,
+          displayName: this.displayName
+        });
+      }
+    } catch (error) {
+      console.error('Reconnection failed:', error);
+      setTimeout(() => this.handleReconnection(participantId), 3000);
+    }
   }
 
   updateRemoteVideo(stream) {
