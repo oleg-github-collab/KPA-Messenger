@@ -320,11 +320,8 @@
         const data = await response.json();
 
         if (response.ok && data.ok) {
-          // Create the correct meeting URL based on current domain
-          const baseUrl = window.location.origin;
-          const meetingUrl = `${baseUrl}/universal.html?room=${encodeURIComponent(data.token)}`;
-
-          meetingLinkInput.value = meetingUrl;
+          // Use the meeting URL provided by the server (mobile.html or desktop.html)
+          meetingLinkInput.value = data.meetingUrl;
           openMeetingBtn.dataset.roomToken = data.token;
           meetingBlock.classList.remove('hidden');
           meetingMessage.textContent = `Ready for ${t('capacityValue', data.maxParticipants || 20)}`;
