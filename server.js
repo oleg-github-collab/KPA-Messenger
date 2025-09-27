@@ -19,9 +19,9 @@ const io = new Server(server, {
   cors: {
     origin: '*',
   },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  connectTimeout: 45000,
+  pingTimeout: 20000,
+  pingInterval: 10000,
+  connectTimeout: 15000,
   maxHttpBufferSize: 1e6,
   transports: ['websocket', 'polling'],
   allowEIO3: true,

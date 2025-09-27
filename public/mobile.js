@@ -341,11 +341,12 @@ class MobileVideoCall {
     try {
       console.log('📱 Starting mobile call initialization...', { video: videoEnabled, audio: audioEnabled });
 
-      // First try to get media
-      await this.initializeMedia(videoEnabled, audioEnabled);
-
-      // Then connect to server
+      // Start media and socket in parallel for faster loading
+      const mediaPromise = this.initializeMedia(videoEnabled, audioEnabled);
       this.connectSocket();
+
+      // Wait for media to be ready
+      await mediaPromise;
 
       // Start timer
       this.startCallTimer();
@@ -370,21 +371,18 @@ class MobileVideoCall {
     try {
       console.log('📱 Requesting mobile media access...', { video: videoEnabled, audio: audioEnabled });
 
-      // Enhanced mobile constraints for better quality and reliability
+      // Fast mobile constraints for quick connection
       const constraints = {
         video: videoEnabled ? {
-          width: { ideal: 1280, min: 480, max: 1920 },
-          height: { ideal: 720, min: 320, max: 1080 },
+          width: { ideal: 480 },
+          height: { ideal: 360 },
           facingMode: this.facingMode,
-          frameRate: { ideal: 30, min: 15, max: 60 }
+          frameRate: { ideal: 20 }
         } : false,
         audio: audioEnabled ? {
-          echoCancellation: { exact: true },
-          noiseSuppression: { exact: true },
-          autoGainControl: { exact: true },
-          sampleRate: { ideal: 48000, min: 44100 },
-          channelCount: { ideal: 2, min: 1 },
-          latency: { ideal: 0.01, max: 0.1 }
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         } : false
       };
 
@@ -853,12 +851,13 @@ class MobileVideoCall {
     console.log('🔌 Connecting mobile to server...');
 
     this.socket = io({
-      transports: ['websocket', 'polling'],
-      timeout: 20000,
+      transports: ['websocket'],
+      timeout: 8000,
       reconnection: true,
-      reconnectionAttempts: 50,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 10000
+      reconnectionAttempts: 8,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 2000,
+      forceNew: true
     });
 
     this.socket.on('connect', () => {
@@ -915,12 +914,10 @@ class MobileVideoCall {
     const peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' }
       ],
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 4,
+      iceTransportPolicy: 'all',
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     });
@@ -1053,7 +1050,11 @@ class MobileVideoCall {
 
     const peerConnection = await this.createPeerConnection(data.socketId);
     console.log('📱 Creating offer for:', data.displayName);
-    const offer = await peerConnection.createOffer();
+    const offer = await peerConnection.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: true,
+      iceRestart: false
+    });
     console.log('📱 Offer SDP contains video:', offer.sdp.includes('m=video'));
     console.log('📱 Offer SDP contains audio:', offer.sdp.includes('m=audio'));
     await peerConnection.setLocalDescription(offer);
